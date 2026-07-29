@@ -1,0 +1,266 @@
+const COLOR_MAP: Record<string, string> = {
+  "brick red": "#812A30",
+  "russet": "#752F25",
+  "cranberry red": "#8C2334",
+  "holly berry": "#9D2234",
+  "ladybug": "#A21828",
+  "radish": "#C32A3F",
+  "rally red": "#D43132",
+  "chili": "#A24037",
+  "baked clay": "#B84D3D",
+  "persimmon": "#C0533E",
+  "tang": "#F45633",
+  "vermilion": "#F45832",
+  "blaze": "#F95929",
+  "marigold orange": "#FE7D3C",
+  "pumpkin": "#E07D20",
+  "bronze": "#9F6F2F",
+  "amber gold": "#D9912B",
+  "gold": "#FCBE0B",
+  "dijon": "#DDAF3F",
+  "dandelion": "#FFD342",
+  "honey jar": "#FDCC63",
+  "harvest peach": "#F4C887",
+  "sherbet": "#FED9BC",
+  "whip": "#FDFCDD",
+  "lemon drop": "#FBF4BD",
+  "butter yellow": "#FEE68E",
+  "dried sage": "#C3BE9E",
+  "wheat gold": "#CCBC7E",
+  "maize": "#FDE674",
+  "sunshine": "#FEF576",
+  "highlighter": "#E0E026",
+  "lime sorbet": "#DBF39B",
+  "apple": "#7AAF45",
+  "wasabi": "#9FA05A",
+  "sage olive": "#A9A65F",
+  "olive drab": "#796F3A",
+  "acorn brown": "#7B6B3A",
+  "loam": "#5A523F",
+  "army": "#555233",
+  "earth": "#433F36",
+  "bark brown": "#3C382F",
+  "hunter green": "#2A3C2E",
+  "forest": "#2D5A27",
+  "forest green": "#2D5A27",
+  "deep forest": "#293A30",
+  "ivy green": "#35593F",
+  "basil": "#77CB7D",
+  "emerald green": "#02935C",
+  "field": "#087D2F",
+  "honeydew mist": "#D8FAD7",
+  "sea breeze": "#BBE0CE",
+  "lagoon mist": "#99C5B8",
+  "surf": "#A3BCB6",
+  "juniper green": "#7F8F85",
+  "verdigris": "#679094",
+  "teal": "#578B89",
+  "caribbean": "#02A9B1",
+  "mint green": "#D2E3DB",
+  "ocean": "#028DC8",
+  "deep aqua": "#00869C",
+  "baltic": "#2D6274",
+  "harbor blue": "#175473",
+  "slate navy": "#303843",
+  "phantom": "#2D2E40",
+  "dark storm": "#2F2F3B",
+  "deep dusk": "#2F3140",
+  "lake": "#185999",
+  "regatta": "#1A5893",
+  "nautical": "#015294",
+  "pool": "#B9E9ED",
+  "seaglass blue": "#87B3C0",
+  "laguna": "#63A6B6",
+  "pistachio cream": "#EDF6E5",
+  "ice grey": "#D1DBDA",
+  "wisp": "#DFEBF9",
+  "quarry": "#93A2A9",
+  "bluebird": "#B0CAE1",
+  "carolina": "#77B7E5",
+  "bluestone": "#5C7186",
+  "lilac grey": "#C1BAD9",
+  "delphinium": "#879DCC",
+  "wisteria ice": "#C3B1D7",
+  "petal pink": "#EADEE2",
+  "silver mist": "#E2DCDE",
+  "indigo plum": "#483B71",
+  "purple haze": "#4E377B",
+  "plum jam": "#413344",
+  "dark fig": "#4B3645",
+  "dark raisin": "#513237",
+  "thistle grey": "#6B596F",
+  "dried orchid": "#846584",
+  "bramble": "#7C667B",
+  "blackcurrant": "#7B2854",
+  "primrose": "#C177A8",
+  "orchid mist": "#DFC6D9",
+  "rosehip": "#C3A29D",
+  "heirloom": "#AA8B91",
+  "lavender mist": "#EDE7F3",
+  "blush pink": "#F9E6E2",
+  "blush peach": "#F7D5C9",
+  "peach bud": "#FDCEC4",
+  "pink sand": "#F3C0BD",
+  "pink lemonade": "#FDC7D7",
+  "strawberry milk": "#F9C1CC",
+  "pink pearl": "#FDC9D5",
+  "blush mauve": "#E0B9BC",
+  "seashell": "#E3BDB2",
+  "peony pink": "#F8B2BC",
+  "rose petal": "#E9ADAF",
+  "warm rose": "#EEB0B1",
+  "coral sand": "#F2B7AF",
+  "salmon rose": "#F1A0A6",
+  "tulip": "#F4A0C4",
+  "punch": "#E8679D",
+  "crunchberry": "#D5407A",
+  "cherry blossom": "#EB7C85",
+  "mahogany dark": "#483634",
+  "bark taupe": "#5E433A",
+  "copper leaf": "#8A533E",
+  "burnt sienna": "#9B5434",
+  "caramel brown": "#945E3A",
+  "adobe clay": "#9A6440",
+  "pecan brown": "#75594D",
+  "cinnamon stick": "#B9895B",
+  "dulce": "#B29063",
+  "cocoa dust": "#6C5E51",
+  "dune stone": "#907F6F",
+  "sandbar": "#C3B09F",
+  "sahara": "#D2BCA7",
+  "macadamia": "#F0E0D0",
+  "linen white": "#F2ECD4",
+  "canvas": "#F6EFD2",
+  "cream white": "#FDF7DF",
+  "almond milk": "#DBCFC1",
+  "polar": "#F3F8FE",
+  "chalk": "#FAFAFA",
+  "pumice stone": "#DBDBD9",
+  "alloy": "#A6AAAD",
+  "agave": "#A1A396",
+  "sage leaf": "#79867F",
+  "basalt": "#686866",
+  "dark moss": "#383D39",
+  "graphite dark": "#2F3336",
+  "oyster shell": "#CFC5BB",
+  "trail dust": "#A19A88",
+  "pewter fog": "#91908E",
+  "phantom gray": "#868485",
+  "dove grey": "#61605E",
+  "stonewall": "#56555A",
+  "cast iron": "#4C4847",
+  "dark carbon": "#333439",
+  "dark dusk": "#32313F",
+  "asphalt": "#2D3037",
+  "coal black": "#222021",
+  "deep black": "#252223",
+  // common aliases
+  "white": "#FFFFFF",
+  "black": "#222021",
+  "navy": "#015294",
+  "navy blue": "#015294",
+  "red": "#D43132",
+  "pink": "#FDC9D5",
+  "light pink": "#FDC9D5",
+  "baby pink": "#F9E6E2",
+  "dark chocolate": "#3C2A1E",
+  "chocolate": "#5C3D2E",
+  "light blue": "#B0CAE1",
+  "baby blue": "#DFEBF9",
+  "sky blue": "#87B3C0",
+  "grey": "#91908E",
+  "gray": "#91908E",
+  "ash grey": "#A6AAAD",
+  "ash gray": "#A6AAAD",
+  "sport grey": "#A6AAAD",
+  "heather grey": "#DBDBD9",
+  "crimson": "#8C2334",
+  "crimson red": "#8C2334",
+  "green": "#02935C",
+  "dark green": "#2A3C2E",
+  "moss green": "#383D39",
+  "yellow": "#FEE68E",
+  "orange": "#F45633",
+  "purple": "#4E377B",
+  "brown": "#75594D",
+  "tan": "#D2BCA7",
+  "cream": "#FDF7DF",
+  "ivory": "#F2ECD4",
+  "ice blue": "#DFEBF9",
+  "cobalt blue": "#185999",
+  "royal blue": "#1A5893",
+  "slate blue": "#5C7186",
+  "slate": "#5C7186",
+  "maroon": "#752F25",
+  "burgundy": "#752F25",
+  "lavender": "#C3B1D7",
+  "lilac": "#C1BAD9",
+  "mint": "#D2E3DB",
+  "turquoise": "#02A9B1",
+  "aqua": "#00869C",
+  "coral": "#F2B7AF",
+  "peach": "#F4C887",
+  "mauve": "#E0B9BC",
+  "rose": "#E9ADAF",
+  "cherry": "#9D2234",
+  "canary": "#FFD342",
+  "lemon": "#FBF4BD",
+  "lime": "#DBF39B",
+  "olive": "#796F3A",
+  "khaki": "#CCBC7E",
+  "beige": "#F0E0D0",
+  "sand": "#D2BCA7",
+  "taupe": "#907F6F",
+  "charcoal": "#4C4847",
+  "silver": "#DBDBD9",
+  "buttermilk": "#FDF7DF",
+};
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const CSS_COLORS = require("color-name") as Record<string, [number, number, number]>;
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+export function colorNameToHex(name: string | null): string {
+  if (!name) return "#CCCCCC";
+
+  // Normalize: lowercase, strip "mto", "custom", extra whitespace
+  const normalized = name
+    .toLowerCase()
+    .replace(/\bmto\b/g, "")
+    .replace(/\bcustom\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Exact match in our map
+  if (COLOR_MAP[normalized]) return COLOR_MAP[normalized];
+
+  // Try each word combo — longest match wins
+  const words = normalized.split(" ");
+  for (let len = words.length; len >= 1; len--) {
+    for (let start = 0; start <= words.length - len; start++) {
+      const phrase = words.slice(start, start + len).join(" ");
+      if (COLOR_MAP[phrase]) return COLOR_MAP[phrase];
+    }
+  }
+
+  // Fall back to CSS named colors (e.g. "butter yellow" → try "butteryellow", each word, combos)
+  const noSpaces = normalized.replace(/\s+/g, "");
+  if (CSS_COLORS[noSpaces]) return rgbToHex(...CSS_COLORS[noSpaces]);
+  for (let len = words.length; len >= 1; len--) {
+    for (let start = 0; start <= words.length - len; start++) {
+      const phrase = words.slice(start, start + len).join("");
+      if (CSS_COLORS[phrase]) return rgbToHex(...CSS_COLORS[phrase]);
+    }
+  }
+
+  // Last resort: hash to a deterministic color that at least has the right hue
+  // Use the first meaningful word to bias the hue toward the actual color
+  const hueWord = words.find((w) => w.length > 3) ?? words[0] ?? normalized;
+  let hash = 0;
+  for (const ch of hueWord) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffff;
+  const h = (hash % 360 + 360) % 360;
+  return `hsl(${h},50%,55%)`;
+}
