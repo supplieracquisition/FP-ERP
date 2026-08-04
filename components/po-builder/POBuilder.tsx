@@ -65,6 +65,8 @@ type LineItem = {
   fabricSwatchCode: string;
   fabricColorCode: string;
   fabricColorOptions: FabricColorOption[];
+  availableFabricCodes: string[];
+  selectedFabricCode: string;
   sizes: Sizes;
   extras: Sizes;
   overrideStyleCode?: string;
@@ -381,6 +383,7 @@ export function POBuilder() {
   const [saving, setSaving] = useState(false);
 
   const [overrideModes, setOverrideModes] = useState<Record<number, Set<string>>>({});
+  const [fabricCodesCache, setFabricCodesCache] = useState<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     fetch("/api/po-builder/suppliers").then((r) => r.json()).then(setSuppliers);
@@ -427,35 +430,82 @@ export function POBuilder() {
     }
   }, [search, selectedSupplierId, searchOrders]);
 
+  const fetchFabricsForStyle = useCallback(async (styleCode: string, lineItemId: number) => {
+    if (!styleCode) return;
+
+    const cached = fabricCodesCache.get(styleCode);
+    if (cached) {
+      if (cached.length === 1) {
+        selectFabric(lineItemId, cached[0]);
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/po-builder/fabrics?styleCode=${encodeURIComponent(styleCode)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const codes: string[] = data.fabricCodes ?? [];
+        setFabricCodesCache((prev) => new Map(prev).set(styleCode, codes));
+
+        setLineItems((prev) =>
+          prev.map((li) =>
+            li.orderItem.id === lineItemId ? { ...li, availableFabricCodes: codes } : li
+          )
+        );
+
+        if (codes.length === 1) {
+          selectFabric(lineItemId, codes[0]);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching fabrics:", error);
+    }
+  }, [fabricCodesCache]);
+
+  const selectFabric = useCallback(async (lineItemId: number, fabricCode: string) => {
+    setLineItems((prev) =>
+      prev.map((li) =>
+        li.orderItem.id === lineItemId
+          ? { ...li, selectedFabricCode: fabricCode, fabricSwatchCode: fabricCode, fabricColorCode: "", fabricColorOptions: [] }
+          : li
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/po-builder/fabric-colors?fabricCode=${encodeURIComponent(fabricCode)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const colors: FabricColorOption[] = (data.colors ?? []).map((c: any) => ({
+          colorCode: c.colorCode,
+          supplier: c.supplier,
+        }));
+
+        setLineItems((prev) =>
+          prev.map((li) =>
+            li.orderItem.id === lineItemId ? { ...li, fabricColorOptions: colors } : li
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching fabric colors:", error);
+    }
+  }, []);
+
   const addItem = useCallback(async (orderItem: OrderItem) => {
     if (lineItems.some((li) => li.orderItem.id === orderItem.id)) return;
 
     setValidationError("");
 
-    let fabricSwatchCode = orderItem.styleCode ?? "";
-    let fabricColorCode = orderItem.color ?? "";
-    let colorOptions: FabricColorOption[] = [];
-
-    if (orderItem.styleCode) {
-      try {
-        const res = await fetch(`/api/po-builder/fabric-details?styleCode=${encodeURIComponent(orderItem.styleCode)}`);
-        if (res.ok) {
-          const data = await res.json();
-          fabricSwatchCode = data.fabricCode;
-          colorOptions = data.colors ?? [];
-        }
-      } catch (error) {
-        console.error("Error fetching fabric details:", error);
-      }
-    }
-
     const newLineItems = [
       ...lineItems,
       {
         orderItem,
-        fabricSwatchCode,
-        fabricColorCode,
-        fabricColorOptions: colorOptions,
+        fabricSwatchCode: "",
+        fabricColorCode: orderItem.color ?? "",
+        fabricColorOptions: [],
+        availableFabricCodes: [],
+        selectedFabricCode: "",
         sizes: { ...EMPTY_SIZES },
         extras: { ...EMPTY_SIZES },
       },
@@ -498,7 +548,11 @@ export function POBuilder() {
     }
 
     setLineItems(newLineItems);
-  }, [lineItems]);
+
+    if (orderItem.styleCode) {
+      fetchFabricsForStyle(orderItem.styleCode, orderItem.id);
+    }
+  }, [lineItems, fetchFabricsForStyle]);
 
   function removeItem(id: number) {
     setLineItems((prev) => prev.filter((li) => li.orderItem.id !== id));
@@ -818,7 +872,7 @@ export function POBuilder() {
                 className="mt-1 w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white">
                 <option value="">Select supplier...</option>
                 {nominatedSuppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.nickname ?? s.name}</option>
+                  <option key={s.id} value={String(s.id)}>{s.nickname ?? s.name}</option>
                 ))}
               </select>
             </div>
@@ -917,6 +971,28 @@ export function POBuilder() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="text-xs text-gray-500 font-medium">Fabric Code</label>
+                  {li.availableFabricCodes.length > 0 ? (
+                    <select
+                      value={li.selectedFabricCode}
+                      onChange={(e) => selectFabric(li.orderItem.id, e.target.value)}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+                    >
+                      <option value="">Select a fabric...</option>
+                      {li.availableFabricCodes.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="mt-1 text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                      No fabrics found for this style. Use the swatch code field below to enter manually.
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs text-gray-500 font-medium">Fabric Swatch Code</label>
                     <button
@@ -969,7 +1045,7 @@ export function POBuilder() {
                       placeholder="e.g. MTO color - Black - #1"
                       className="mt-1 w-full text-xs border border-blue-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-600 bg-blue-50"
                     />
-                  ) : li.fabricColorOptions.length > 0 ? (
+                  ) : li.selectedFabricCode && li.fabricColorOptions.length > 0 ? (
                     <select
                       value={li.fabricColorCode}
                       onChange={(e) => updateLineItem(li.orderItem.id, { fabricColorCode: e.target.value })}
@@ -982,13 +1058,14 @@ export function POBuilder() {
                         </option>
                       ))}
                     </select>
+                  ) : li.selectedFabricCode ? (
+                    <div className="mt-1 text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                      Loading colors for {li.selectedFabricCode}...
+                    </div>
                   ) : (
-                    <input
-                      value={li.fabricColorCode}
-                      onChange={(e) => updateLineItem(li.orderItem.id, { fabricColorCode: e.target.value })}
-                      placeholder="e.g. MTO color - Black - #1"
-                      className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700"
-                    />
+                    <div className="mt-1 text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                      Select a fabric first to see available colors
+                    </div>
                   )}
                 </div>
               </div>

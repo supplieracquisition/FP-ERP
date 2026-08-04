@@ -146,6 +146,7 @@ export async function PATCH(
   if (body.printerShipDate !== undefined) updates.printerShipDate = body.printerShipDate;
   if (body.delayReason !== undefined) updates.delayReason = body.delayReason;
   if (body.supplierId !== undefined) updates.supplierId = body.supplierId;
+  if (body.nominatedSupplierId !== undefined) updates.nominatedSupplierId = body.nominatedSupplierId;
   if (body.requiresTestPrint !== undefined) updates.requiresTestPrint = body.requiresTestPrint;
   if (body.testPrintStatus !== undefined) updates.testPrintStatus = body.testPrintStatus;
   if (body.inHandsDate !== undefined) updates.inHandsDate = body.inHandsDate;

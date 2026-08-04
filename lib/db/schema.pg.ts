@@ -57,6 +57,7 @@ export const orderItems = pgTable(
     originalPrinterShipDate: text("original_printer_ship_date"),
     delayReason: text("delay_reason"),
     supplierId: integer("supplier_id").references(() => suppliers.id),
+    nominatedSupplierId: integer("nominated_supplier_id").references(() => suppliers.id),
     printType: text("print_type"),
     printLocations: integer("print_locations"),
     decoratingMethods: text("decorating_methods"),
@@ -189,7 +190,7 @@ export const fabricColors = pgTable(
   "fabric_colors",
   {
     id: serial("id").primaryKey(),
-    fabricDetailsId: integer("fabric_details_id").notNull().references(() => fabricDetails.id),
+    fabricDetailsId: integer("fabric_details_id").references(() => fabricDetails.id),
     fabricCode: text("fabric_code").notNull(),
     colorCode: text("color_code").notNull(),
     supplier: text("supplier"),

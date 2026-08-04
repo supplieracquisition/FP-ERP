@@ -377,7 +377,7 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
                 >
                   <option value="">Select supplier...</option>
                   {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
+                    <option key={s.id} value={String(s.id)}>{s.name}</option>
                   ))}
                 </select>
               </div>

@@ -9,8 +9,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/api/") ||
     pathname.startsWith("/uploads/");
 
-  // Check for session cookie
-  const sessionCookie = request.cookies.get("fp-user-id");
+  // Check for session cookie (local SQLite: fp_local_user_id, production: fp-user-id)
+  const sessionCookie = request.cookies.get("fp-user-id") || request.cookies.get("fp_local_user_id");
 
   if (!sessionCookie && !isPublicPath) {
     // No session, redirect to login

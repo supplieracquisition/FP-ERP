@@ -193,7 +193,7 @@ export const fabricColors = sqliteTable(
   "fabric_colors",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    fabricDetailsId: integer("fabric_details_id").notNull().references(() => fabricDetails.id),
+    fabricDetailsId: integer("fabric_details_id").references(() => fabricDetails.id),
     fabricCode: text("fabric_code").notNull(),
     colorCode: text("color_code").notNull(),
     supplier: text("supplier"),
