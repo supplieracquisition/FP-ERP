@@ -30,6 +30,7 @@ const BASE_SELECT = {
   trackingNumber: orderItems.trackingNumber,
   templatePdf: orderItems.templatePdf,
   supplierId: orderItems.supplierId,
+  nominatedSupplierId: orderItems.nominatedSupplierId,
   supplierName: suppliers.name,
   supplierNickname: suppliers.nickname,
   clientName: orderItems.clientName,

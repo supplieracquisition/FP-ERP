@@ -43,6 +43,7 @@ export async function GET(
       trackingNumber: orderItems.trackingNumber,
       updatedAt: orderItems.updatedAt,
       supplierId: orderItems.supplierId,
+      nominatedSupplierId: orderItems.nominatedSupplierId,
       supplierName: suppliers.name,
       supplierNickname: suppliers.nickname,
     })
