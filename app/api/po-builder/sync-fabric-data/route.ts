@@ -4,11 +4,13 @@ import {
   fabricDetails,
   fabricColors,
   fpeSuppliers,
+  apiKeys,
 } from "@/lib/db/schema";
 import { parseMTOTemplateFromContent } from "@/lib/csv/mtoParser";
 import { parseFPEDatabaseFromContent } from "@/lib/csv/fpeParser";
-import { count } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
+import crypto from "crypto";
 
 interface SyncSummary {
   mto?: {
@@ -23,8 +25,47 @@ interface SyncSummary {
   };
 }
 
+async function verifyApiKey(keyString: string): Promise<boolean> {
+  try {
+    const hashedKey = crypto.createHash("sha256").update(keyString).digest("hex");
+    const [key] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.key, hashedKey))
+      .limit(1);
+
+    if (!key) return false;
+
+    // Log usage by updating lastUsedAt
+    await db
+      .update(apiKeys)
+      .set({ lastUsedAt: new Date().toISOString() })
+      .where(eq(apiKeys.id, key.id));
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
-  await requireInternal();
+  // Allow either API key auth or session auth
+  let isApiKeyAuth = false;
+  const authHeader = request.headers.get("authorization");
+
+  if (authHeader?.startsWith("Bearer ")) {
+    const keyString = authHeader.slice(7);
+    const isValid = await verifyApiKey(keyString);
+    if (!isValid) {
+      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    }
+    isApiKeyAuth = true;
+  }
+
+  // If no API key provided, require session auth
+  if (!isApiKeyAuth) {
+    await requireInternal();
+  }
 
   try {
     const body = await request.json();
