@@ -32,3 +32,8 @@ tsconfig.tsbuildinfo
 
 # Vercel
 .vercel
+
+# One-time import scripts and data artifacts
+import_fabric_data.ts
+fabric_details.csv
+fabric_colors.csv
