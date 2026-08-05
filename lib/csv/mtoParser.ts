@@ -32,17 +32,16 @@ export interface FabricColor {
   supplier: string;
 }
 
-export async function parseMTOTemplate(filePath: string): Promise<{
+export async function parseMTOTemplateFromContent(csvContent: string): Promise<{
   fabricDetails: FabricDetail[];
   fabricColors: FabricColor[];
 }> {
-  const fileContent = fs.readFileSync(filePath, "utf-8");
-  const lines = fileContent.split("\n");
+  const lines = csvContent.split("\n");
 
   // Skip first line (title), parse from second line
-  const csvContent = lines.slice(1).join("\n");
+  const cleanedCsv = lines.slice(1).join("\n");
 
-  const records = parse(csvContent, {
+  const records = parse(cleanedCsv, {
     columns: [
       "style",
       "product",
@@ -114,6 +113,14 @@ export async function parseMTOTemplate(filePath: string): Promise<{
     fabricDetails: Array.from(fabricDetailsMap.values()),
     fabricColors: fabricColorsList,
   };
+}
+
+export async function parseMTOTemplate(filePath: string): Promise<{
+  fabricDetails: FabricDetail[];
+  fabricColors: FabricColor[];
+}> {
+  const fileContent = fs.readFileSync(filePath, "utf-8");
+  return parseMTOTemplateFromContent(fileContent);
 }
 
 export async function deduplicateFabricColors(

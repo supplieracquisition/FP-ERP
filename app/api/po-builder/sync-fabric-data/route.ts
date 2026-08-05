@@ -5,106 +5,208 @@ import {
   fabricColors,
   fpeSuppliers,
 } from "@/lib/db/schema";
-import { parseMTOTemplate } from "@/lib/csv/mtoParser";
-import { parseFPEDatabase } from "@/lib/csv/fpeParser";
-import { eq } from "drizzle-orm";
+import { parseMTOTemplateFromContent } from "@/lib/csv/mtoParser";
+import { parseFPEDatabaseFromContent } from "@/lib/csv/fpeParser";
+import { count } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
+
+interface SyncSummary {
+  mto?: {
+    rowsParsed: number;
+    previousRowCount: number;
+    newRowCount: number;
+  };
+  fpe?: {
+    rowsParsed: number;
+    previousRowCount: number;
+    newRowCount: number;
+  };
+}
 
 export async function POST(request: NextRequest) {
   await requireInternal();
 
   try {
     const body = await request.json();
-    const { mtoFilePath, fpeFilePath } = body;
+    const { mtoContent, fpeContent, force = false } = body;
 
-    if (!mtoFilePath || !fpeFilePath) {
+    if (!mtoContent && !fpeContent) {
       return NextResponse.json(
-        { error: "Both mtoFilePath and fpeFilePath are required" },
+        { error: "At least one of mtoContent or fpeContent is required" },
         { status: 400 }
       );
     }
 
-    // Parse MTO Template
-    const { fabricDetails: fabricDetailsRecords, fabricColors: dedupFabricColors } =
-      await parseMTOTemplate(mtoFilePath);
+    const summary: SyncSummary = {};
+    let mtoDetailsRecords: any[] = [];
+    let mtoColorsRecords: any[] = [];
+    let fpeRecords: any[] = [];
 
-    // Colors are already deduplicated by the parser
+    // PARSE & VALIDATE MTO if provided
+    if (mtoContent) {
+      console.log("Parsing MTO Template...");
+      const parsed = await parseMTOTemplateFromContent(mtoContent);
+      mtoDetailsRecords = parsed.fabricDetails;
+      mtoColorsRecords = parsed.fabricColors;
 
-    // Parse FPE Database
-    const fpeRecords = await parseFPEDatabase(fpeFilePath);
+      const currentMtoDetailsCount = await db
+        .select({ count: count() })
+        .from(fabricDetails);
+      const currentMtoDetailsNum = currentMtoDetailsCount[0]?.count || 0;
 
-    // Clear existing data
-    await db.delete(fabricColors);
-    await db.delete(fabricDetails);
-    await db.delete(fpeSuppliers);
-
-    console.log(`Inserting ${fabricDetailsRecords.length} fabric details...`);
-    // Insert fabric details
-    const insertedDetails = await db
-      .insert(fabricDetails)
-      .values(fabricDetailsRecords)
-      .returning();
-
-    console.log(`Inserted ${insertedDetails.length} fabric details`);
-
-    // Create map of fabric details by (style, fabricCode) for color insertion
-    const detailsMap = new Map<string, number>();
-    for (const detail of insertedDetails) {
-      const key = `${detail.style}|${detail.fabricCode}`;
-      detailsMap.set(key, detail.id);
-      console.log(`Mapped ${key} -> ID ${detail.id}`);
-    }
-
-    // Insert fabric colors
-    console.log(`Processing ${dedupFabricColors.length} fabric colors...`);
-    const colorsToInsert: any[] = [];
-
-    for (const color of dedupFabricColors) {
-      // Find the fabric detail that matches BOTH style and fabric code
-      const matchingDetail = insertedDetails.find(
-        (d) => d.style === color.style && d.fabricCode === color.fabricCode
+      console.log(
+        `MTO: parsed ${mtoDetailsRecords.length} details, current DB has ${currentMtoDetailsNum}`
       );
 
-      if (!matchingDetail) {
-        console.warn(`No fabric detail found for ${color.style}|${color.fabricCode}`);
-        continue;
+      // Safety check: abort if 0 rows or < 50% of current
+      if (mtoDetailsRecords.length === 0) {
+        return NextResponse.json(
+          {
+            error: "MTO validation failed: parsed 0 rows. Use force: true to override.",
+          },
+          { status: 400 }
+        );
       }
 
-      colorsToInsert.push({
-        fabricDetailsId: matchingDetail.id,
-        fabricCode: color.fabricCode,
-        colorCode: color.colorCode,
-        supplier: color.supplier,
+      const threshold = Math.ceil(currentMtoDetailsNum * 0.5);
+      if (
+        currentMtoDetailsNum > 0 &&
+        mtoDetailsRecords.length < threshold &&
+        !force
+      ) {
+        return NextResponse.json(
+          {
+            error: `MTO validation failed: parsed ${mtoDetailsRecords.length} rows, current DB has ${currentMtoDetailsNum} (would delete >50%). Use force: true to override.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      summary.mto = {
+        rowsParsed: mtoDetailsRecords.length,
+        previousRowCount: currentMtoDetailsNum,
+        newRowCount: 0, // filled after insert
+      };
+    }
+
+    // PARSE & VALIDATE FPE if provided
+    if (fpeContent) {
+      console.log("Parsing FPE Database...");
+      fpeRecords = await parseFPEDatabaseFromContent(fpeContent);
+
+      const currentFpeCount = await db
+        .select({ count: count() })
+        .from(fpeSuppliers);
+      const currentFpeNum = currentFpeCount[0]?.count || 0;
+
+      console.log(
+        `FPE: parsed ${fpeRecords.length} records, current DB has ${currentFpeNum}`
+      );
+
+      // Safety check: abort if 0 rows or < 50% of current
+      if (fpeRecords.length === 0) {
+        return NextResponse.json(
+          {
+            error: "FPE validation failed: parsed 0 rows. Use force: true to override.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const threshold = Math.ceil(currentFpeNum * 0.5);
+      if (currentFpeNum > 0 && fpeRecords.length < threshold && !force) {
+        return NextResponse.json(
+          {
+            error: `FPE validation failed: parsed ${fpeRecords.length} rows, current DB has ${currentFpeNum} (would delete >50%). Use force: true to override.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      summary.fpe = {
+        rowsParsed: fpeRecords.length,
+        previousRowCount: currentFpeNum,
+        newRowCount: 0, // filled after insert
+      };
+    }
+
+    // SYNC MTO in transaction
+    if (mtoContent && summary.mto) {
+      await db.transaction(async (tx) => {
+        console.log("Deleting existing fabric details and colors...");
+        await tx.delete(fabricColors);
+        await tx.delete(fabricDetails);
+
+        console.log(`Inserting ${mtoDetailsRecords.length} fabric details...`);
+        const insertedDetails = await tx
+          .insert(fabricDetails)
+          .values(mtoDetailsRecords)
+          .returning();
+
+        // Create map of fabric details for color insertion
+        const detailsMap = new Map<string, number>();
+        for (const detail of insertedDetails) {
+          const key = `${detail.style}|${detail.fabricCode}`;
+          detailsMap.set(key, detail.id);
+        }
+
+        // Insert fabric colors
+        console.log(`Processing ${mtoColorsRecords.length} fabric colors...`);
+        const colorsToInsert: any[] = [];
+
+        for (const color of mtoColorsRecords) {
+          const matchingDetail = insertedDetails.find(
+            (d) => d.style === color.style && d.fabricCode === color.fabricCode
+          );
+
+          if (!matchingDetail) {
+            console.warn(
+              `No fabric detail found for ${color.style}|${color.fabricCode}`
+            );
+            continue;
+          }
+
+          colorsToInsert.push({
+            fabricDetailsId: matchingDetail.id,
+            fabricCode: color.fabricCode,
+            colorCode: color.colorCode,
+            supplier: color.supplier,
+          });
+        }
+
+        if (colorsToInsert.length > 0) {
+          await tx.insert(fabricColors).values(colorsToInsert);
+        }
+        console.log(`Inserted ${insertedDetails.length} fabric details`);
+
+        summary.mto!.newRowCount = insertedDetails.length;
       });
     }
 
-    console.log(`Inserting ${colorsToInsert.length} fabric colors...`);
-    if (colorsToInsert.length > 0) {
-      await db.insert(fabricColors).values(colorsToInsert);
-    }
-    console.log(`Inserted ${colorsToInsert.length} fabric colors`);
+    // SYNC FPE in transaction
+    if (fpeContent && summary.fpe) {
+      await db.transaction(async (tx) => {
+        console.log("Deleting existing FPE suppliers...");
+        await tx.delete(fpeSuppliers);
 
-    console.log(`Inserting ${fpeRecords.length} FPE suppliers...`);
-    // Insert FPE suppliers
-    await db.insert(fpeSuppliers).values(fpeRecords);
+        console.log(`Inserting ${fpeRecords.length} FPE suppliers...`);
+        await tx.insert(fpeSuppliers).values(fpeRecords);
+
+        summary.fpe!.newRowCount = fpeRecords.length;
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      counts: {
-        fabricDetails: insertedDetails.length,
-        fabricColors: colorsToInsert.length,
-        fpeSuppliers: fpeRecords.length,
-      },
-      message: "Fabric and supplier data synced successfully",
+      summary,
+      message: "Data synced successfully",
     });
   } catch (error) {
     console.error("Sync error:", error);
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to sync fabric data",
+          error instanceof Error ? error.message : "Failed to sync data",
       },
       { status: 500 }
     );

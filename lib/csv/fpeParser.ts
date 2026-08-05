@@ -39,9 +39,7 @@ export interface FPESupplier {
   weights: string;
 }
 
-export async function parseFPEDatabase(filePath: string): Promise<FPESupplier[]> {
-  const fileContent = fs.readFileSync(filePath, "utf-8");
-
+export async function parseFPEDatabaseFromContent(csvContent: string): Promise<FPESupplier[]> {
   // Map actual CSV headers to camelCase field names
   const headerMapping: Record<string, string> = {
     "Style Code": "styleCode",
@@ -62,7 +60,7 @@ export async function parseFPEDatabase(filePath: string): Promise<FPESupplier[]>
     "Weights": "weights",
   };
 
-  const records = parse(fileContent, {
+  const records = parse(csvContent, {
     columns: (headers: string[]) =>
       headers.map((h) => headerMapping[h] || h),
     skip_empty_lines: true,
@@ -75,14 +73,36 @@ export async function parseFPEDatabase(filePath: string): Promise<FPESupplier[]>
   console.log(`Parsed ${records.length} total records from FPE database`);
 
   // Filter out header row if included, and ensure we have required fields
-  const dataRecords = records.filter(
-    (r) =>
+  const dropped: any[] = [];
+  const dataRecords = records.filter((r) => {
+    const isValid =
       r.styleCode &&
       r.styleCode !== "Style Code" &&
       r.supplierName &&
-      r.product
-  );
+      r.product;
+    if (!isValid) {
+      dropped.push({
+        styleCode: r.styleCode || "(empty)",
+        supplierName: r.supplierName || "(empty)",
+        product: r.product || "(empty)",
+        reason: !r.styleCode
+          ? "no styleCode"
+          : r.styleCode === "Style Code"
+            ? "header"
+            : !r.supplierName
+              ? "no supplierName"
+              : "no product",
+      });
+    }
+    return isValid;
+  });
 
+  if (dropped.length > 0) {
+    console.log(
+      `Filtered out ${dropped.length} rows:\n`,
+      JSON.stringify(dropped, null, 2)
+    );
+  }
   console.log(`Filtered to ${dataRecords.length} valid data records`);
 
   return dataRecords.map((record) => ({
@@ -106,4 +126,9 @@ export async function parseFPEDatabase(filePath: string): Promise<FPESupplier[]>
     seaShippingTimeline: record.seaShippingTimeline || "",
     weights: record.weights || "",
   }));
+}
+
+export async function parseFPEDatabase(filePath: string): Promise<FPESupplier[]> {
+  const fileContent = fs.readFileSync(filePath, "utf-8");
+  return parseFPEDatabaseFromContent(fileContent);
 }
