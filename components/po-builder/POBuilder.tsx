@@ -603,6 +603,7 @@ export function POBuilder() {
 
   async function saveAndExport(format: "pdf" | "csv") {
     try {
+      console.log("saveAndExport: Starting...");
       setSaving(true);
       const orderItemIds = lineItems.map((li) => li.orderItem.id);
 
@@ -620,11 +621,15 @@ export function POBuilder() {
         throw new Error("All items must have the same nominated supplier. Found multiple nominated suppliers.");
       }
 
+      console.log("saveAndExport: Validation passed, calling /api/po-builder/assign-items...");
       const shouldTestPrint = needsTestPrint || lineItems.some((li) => li.orderItem.requiresTestPrint);
       const productionStage = shouldTestPrint ? "sample_production" : "fabric_sourcing";
       const finalTestPrintDate = needsTestPrint && testPrintDate
         ? new Date(testPrintDate).toISOString()
         : undefined;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
       const res = await fetch("/api/po-builder/assign-items", {
         method: "POST",
@@ -638,7 +643,10 @@ export function POBuilder() {
           shippingMethod,
           testPrintDate: finalTestPrintDate,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -647,20 +655,24 @@ export function POBuilder() {
       }
 
       const result = await res.json();
-      console.log("PO details saved:", result);
+      console.log("saveAndExport: PO details saved:", result);
       toast.success("PO details saved to ERP");
 
       // Now download the file
+      console.log("saveAndExport: Calling downloadPDF...");
       if (format === "pdf") {
         await downloadPDF();
       } else {
         await downloadCSV();
       }
 
+      console.log("saveAndExport: Download complete, closing summary...");
       setShowSummary(false);
+      setSaving(false);
     } catch (error) {
       console.error("Error saving PO:", error);
       toast.error(error instanceof Error ? error.message : "Failed to save PO");
+      setSaving(false);
     } finally {
       setSaving(false);
     }
@@ -685,9 +697,11 @@ export function POBuilder() {
 
   async function downloadPDF() {
     try {
+      console.log("downloadPDF: Starting...");
       const nominatedSupplierId = lineItems[0]?.orderItem.nominatedSupplierId;
       const supplier = nominatedSupplierId ? suppliers.find((s) => s.id === nominatedSupplierId) ?? null : null;
       console.log("DEBUG downloadPDF:", { nominatedSupplierId, supplier, allSuppliers: suppliers });
+
       const processedItems = lineItems.map((li) => ({
         orderItemId: li.orderItem.orderItemId,
         orderName: li.orderItem.orderName,
@@ -699,6 +713,10 @@ export function POBuilder() {
         sizes: li.sizes,
         extras: li.extras,
       }));
+
+      console.log("downloadPDF: Calling /api/po-builder/export-html...");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
       const res = await fetch("/api/po-builder/export-html", {
         method: "POST",
@@ -714,26 +732,34 @@ export function POBuilder() {
           lineItems: processedItems,
           orderInstructions,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (res.ok) {
+        console.log("downloadPDF: Received HTML, opening in new window...");
         const html = await res.text();
         const blob = new Blob([html], { type: "text/html" });
         const url = URL.createObjectURL(blob);
         const newWindow = window.open(url);
         if (newWindow) {
+          console.log("downloadPDF: Window opened, printing in 500ms...");
           setTimeout(() => {
             newWindow.print();
+            console.log("downloadPDF: Print dialog triggered");
           }, 500);
         } else {
           toast.error("Pop-up blocked. Please allow pop-ups and try again.");
         }
       } else {
+        const errText = await res.text();
+        console.error("downloadPDF: API returned error", res.status, errText);
         toast.error("Failed to generate PO");
       }
     } catch (error) {
       console.error("PO export error:", error);
-      toast.error("Error generating PO");
+      toast.error(error instanceof Error ? error.message : "Error generating PO");
     }
   }
 
