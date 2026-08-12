@@ -605,10 +605,19 @@ export function POBuilder() {
     try {
       setSaving(true);
       const orderItemIds = lineItems.map((li) => li.orderItem.id);
-      const nominatedSupplierId = lineItems[0]?.orderItem.nominatedSupplierId;
 
+      if (!lineItems.length) {
+        throw new Error("No items selected");
+      }
+
+      const nominatedSupplierId = lineItems[0]?.orderItem.nominatedSupplierId;
       if (!nominatedSupplierId) {
-        throw new Error("No nominated supplier found");
+        throw new Error("First item has no nominated supplier. Please select items with a nominated supplier.");
+      }
+
+      const allHaveSameSupplier = lineItems.every(li => li.orderItem.nominatedSupplierId === nominatedSupplierId);
+      if (!allHaveSameSupplier) {
+        throw new Error("All items must have the same nominated supplier. Found multiple nominated suppliers.");
       }
 
       const shouldTestPrint = needsTestPrint || lineItems.some((li) => li.orderItem.requiresTestPrint);
