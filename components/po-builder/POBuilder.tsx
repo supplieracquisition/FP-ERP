@@ -685,7 +685,8 @@ export function POBuilder() {
 
   async function downloadPDF() {
     try {
-      const supplier = suppliers.find((s) => s.id === parseInt(selectedSupplierId)) ?? null;
+      const nominatedSupplierId = lineItems[0]?.orderItem.nominatedSupplierId;
+      const supplier = nominatedSupplierId ? suppliers.find((s) => s.id === nominatedSupplierId) ?? null : null;
       const processedItems = lineItems.map((li) => ({
         orderItemId: li.orderItem.orderItemId,
         orderName: li.orderItem.orderName,
