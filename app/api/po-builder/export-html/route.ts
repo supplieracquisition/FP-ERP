@@ -127,15 +127,22 @@ export async function POST(request: NextRequest) {
     html = html.replace(/8th Floor, No\. 478, Sports Road, Humen Town, Dongguan City, Guangdong Province/g, supplierAddress);
     html = html.replace(/8th Floor, No\. 478, Sports Road,<br>Humen Town, Dongguan City, Guangdong, China/g, supplierAddress);
 
-    // Only replace contact details if they exist
-    if (pocName) {
-      html = html.replace(/Mr Abel Deng/g, pocName);
+    // ALWAYS replace contact details - with actual values or empty string
+    html = html.replace(/Mr\. Abel Deng/g, pocName);
+
+    // For contact line (email · phone), rebuild it based on what exists
+    const contactParts = [];
+    if (pocEmail) contactParts.push(pocEmail);
+    if (pocPhone) contactParts.push(pocPhone);
+    const contactLine = contactParts.join(" &nbsp;·&nbsp; ");
+    html = html.replace(/goodfacex214@gmail\.com &nbsp;·&nbsp; \+86 186 7607 3832/g, contactLine);
+
+    // Also handle cases where only one of email/phone exists
+    if (!pocEmail && pocPhone) {
+      html = html.replace(/goodfacex214@gmail\.com &nbsp;·&nbsp; /g, "");
     }
-    if (pocEmail) {
-      html = html.replace(/goodfacex214@gmail\.com/g, pocEmail);
-    }
-    if (pocPhone) {
-      html = html.replace(/\+86 18676073832/g, pocPhone);
+    if (!pocPhone && pocEmail) {
+      html = html.replace(/ &nbsp;·&nbsp; \+86 186 7607 3832/g, "");
     }
 
     // Replace client name
