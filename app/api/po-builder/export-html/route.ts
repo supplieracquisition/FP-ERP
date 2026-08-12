@@ -131,8 +131,26 @@ export async function POST(request: NextRequest) {
       html = html.replace(/642 Rebel Dr<br>Oxford, MS 38677, USA/g, deliveryAddress);
     }
 
-    // Replace shipping method
-    html = html.replace(/DDP Sea/g, shippingMethod);
+    // Replace shipping method - match the template format exactly
+    html = html.replace(/DDP — Sea Freight/g, shippingMethod || "DDP — Sea Freight");
+
+    // Calculate total units from line items
+    const totalUnits = lineItems.reduce((sum, item) => {
+      const xs = parseInt(item.sizes.xs) || 0;
+      const s = parseInt(item.sizes.s) || 0;
+      const m = parseInt(item.sizes.m) || 0;
+      const l = parseInt(item.sizes.l) || 0;
+      const xl = parseInt(item.sizes.xl) || 0;
+      const xxl = parseInt(item.sizes.xxl) || 0;
+      const xxxl = parseInt(item.sizes.xxxl) || 0;
+      const itemTotal = xs + s + m + l + xl + xxl + xxxl;
+      const extras = Object.values(item.extras).reduce((e, v) => e + (parseInt(v) || 0), 0);
+      return sum + itemTotal + extras;
+    }, 0);
+
+    // Replace total units in both locations
+    html = html.replace(/390 pcs/g, `${totalUnits} pcs`);
+    html = html.replace(/<td colspan="2" class="foot-total">390<\/td>/g, `<td colspan="2" class="foot-total">${totalUnits}</td>`);
 
     // Replace line items
     const lineItemsRows = generateLineItemRows(lineItems);
@@ -142,14 +160,18 @@ export async function POST(request: NextRequest) {
       html = html.substring(0, tbodyStart + 7) + "\n" + lineItemsRows + "\n      " + html.substring(tbodyEnd);
     }
 
-    // Replace notes
-    const notes = orderInstructions || "- The PO is for making the garment and printing the design on them.\n- We'll need pre production images for this before proceeding with mass production.\n- Print type is listed above.\n- Please send the tracking when the order ships out.\n- Please Blind ship this order.";
-    const notesHtml = notes
-      .split("\n")
-      .filter((line) => line.trim())
-      .map((line) => `      <li>${line.replace(/^- /, "")}</li>`)
-      .join("\n");
-    html = html.replace(/<ul>[\s\S]*?<\/ul>/, `<ul>\n${notesHtml}\n    </ul>`);
+    // Replace notes - avoid complex regex by using simpler string search
+    const ulStart = html.indexOf("<ul>");
+    const ulEnd = html.indexOf("</ul>");
+    if (ulStart !== -1 && ulEnd !== -1) {
+      const notes = orderInstructions || "- The PO is for making the garment and printing the design on them.\n- We'll need pre production images for this before proceeding with mass production.\n- Print type is listed above.\n- Please send the tracking when the order ships out.\n- Please Blind ship this order.";
+      const notesHtml = notes
+        .split("\n")
+        .filter((line) => line.trim())
+        .map((line) => `      <li>${line.replace(/^- /, "")}</li>`)
+        .join("\n");
+      html = html.substring(0, ulStart + 4) + "\n" + notesHtml + "\n    " + html.substring(ulEnd);
+    }
 
     return new NextResponse(html, {
       status: 200,
