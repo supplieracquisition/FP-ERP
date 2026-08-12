@@ -89,11 +89,6 @@ function buildConditions(params: URLSearchParams, session: { user: { role: strin
   const decoration = params.get("decoration") ?? "";
   if (decoration) conditions.push(sql`lower(${orderItems.decoratingMethods}) like lower(${"%" + decoration + "%"})`);
 
-  const nominatedSupplierId = params.get("nominatedSupplierId") ?? "";
-  if (nominatedSupplierId) {
-    conditions.push(eq(orderItems.nominatedSupplierId, Number(nominatedSupplierId)));
-  }
-
   const search = params.get("search") ?? "";
   if (search) {
     conditions.push(sql`(
