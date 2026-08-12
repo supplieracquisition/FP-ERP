@@ -105,9 +105,11 @@ export async function POST(request: NextRequest) {
     html = html.replace(/#182531/g, `#${poNumber}`);
     html = html.replace(/Purchase Order 182531/g, `Purchase Order ${poNumber}`);
 
-    // Replace dates
+    // Replace dates - handle both text and table row formats
     html = html.replace(/6 June 2026/g, formatDate(poDate));
     html = html.replace(/23 July 2026/g, formatDate(deliveryDate));
+    html = html.replace(/Jun 7, 2026/g, formatDate(poDate));
+    html = html.replace(/Jul 23, 2026/g, formatDate(deliveryDate));
 
     // Replace supplier details
     const supplierName = supplier?.name || "Supplier Name";
@@ -116,9 +118,15 @@ export async function POST(request: NextRequest) {
     const pocPhone = supplier?.pocPhone || "";
     const pocEmail = supplier?.contactEmail || "";
 
-    // Replace in Bill To and Ship To sections
+    // Replace in Bill To and Ship From sections
     html = html.replace(/Dongguan Qianlong Clothing Co\., Ltd\./g, supplierName);
-    html = html.replace(/8th Floor, No\. 478, Sports Road, Humen Town, Dongguan City, Guangdong Province/g, supplierAddress);
+
+    // Replace supplier address (only if supplier has it)
+    if (supplier?.address) {
+      html = html.replace(/8th Floor, No\. 478, Sports Road, Humen Town, Dongguan City, Guangdong Province/g, supplierAddress);
+      html = html.replace(/8th Floor, No\. 478, Sports Road,<br>Humen Town, Dongguan City, Guangdong, China/g, supplierAddress);
+    }
+
     html = html.replace(/Mr Abel Deng/g, pocName);
     html = html.replace(/goodfacex214@gmail\.com/g, pocEmail);
     html = html.replace(/\+86 18676073832/g, pocPhone);
@@ -134,7 +142,7 @@ export async function POST(request: NextRequest) {
     // Replace shipping method - match the template format exactly
     html = html.replace(/DDP — Sea Freight/g, shippingMethod || "DDP — Sea Freight");
 
-    // Calculate total units from line items
+    // Calculate total units and line item count from line items
     const totalUnits = lineItems.reduce((sum, item) => {
       const xs = parseInt(item.sizes.xs) || 0;
       const s = parseInt(item.sizes.s) || 0;
@@ -152,6 +160,9 @@ export async function POST(request: NextRequest) {
     html = html.replace(/390 pcs/g, `${totalUnits} pcs`);
     html = html.replace(/<td colspan="2" class="foot-total">390<\/td>/g, `<td colspan="2" class="foot-total">${totalUnits}</td>`);
 
+    // Replace line items count
+    html = html.replace(/5 styles/g, `${lineItems.length} ${lineItems.length === 1 ? 'style' : 'styles'}`);
+
     // Replace line items
     const lineItemsRows = generateLineItemRows(lineItems);
     const tbodyStart = html.indexOf("<tbody>");
@@ -160,17 +171,21 @@ export async function POST(request: NextRequest) {
       html = html.substring(0, tbodyStart + 7) + "\n" + lineItemsRows + "\n      " + html.substring(tbodyEnd);
     }
 
-    // Replace notes - avoid complex regex by using simpler string search
+    // Replace notes - only if orderInstructions is provided, otherwise remove the section
     const ulStart = html.indexOf("<ul>");
     const ulEnd = html.indexOf("</ul>");
     if (ulStart !== -1 && ulEnd !== -1) {
-      const notes = orderInstructions || "- The PO is for making the garment and printing the design on them.\n- We'll need pre production images for this before proceeding with mass production.\n- Print type is listed above.\n- Please send the tracking when the order ships out.\n- Please Blind ship this order.";
-      const notesHtml = notes
-        .split("\n")
-        .filter((line) => line.trim())
-        .map((line) => `      <li>${line.replace(/^- /, "")}</li>`)
-        .join("\n");
-      html = html.substring(0, ulStart + 4) + "\n" + notesHtml + "\n    " + html.substring(ulEnd);
+      if (orderInstructions && orderInstructions.trim()) {
+        const notesHtml = orderInstructions
+          .split("\n")
+          .filter((line) => line.trim())
+          .map((line) => `      <li>${line.replace(/^- /, "")}</li>`)
+          .join("\n");
+        html = html.substring(0, ulStart + 4) + "\n" + notesHtml + "\n    " + html.substring(ulEnd);
+      } else {
+        // If no instructions provided, leave notes section empty
+        html = html.substring(0, ulStart + 4) + "\n    " + html.substring(ulEnd);
+      }
     }
 
     return new NextResponse(html, {
