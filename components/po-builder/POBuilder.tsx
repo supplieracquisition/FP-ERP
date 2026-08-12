@@ -106,7 +106,10 @@ function generateCSV(
 ): string {
   const fmtDate = (d: string) => {
     if (!d) return "";
-    try { return format(new Date(d), "M/d/yyyy"); } catch { return d; }
+    try {
+      const [year, month, day] = d.split('-').map(Number);
+      return format(new Date(year, month - 1, day), "M/d/yyyy");
+    } catch { return d; }
   };
 
   const lines: string[] = [];
@@ -265,7 +268,10 @@ function POSummaryModal({
 }: POSummaryModalProps) {
   const fmtDate = (d: string) => {
     if (!d) return "—";
-    try { return format(new Date(d), "MMM d, yyyy"); } catch { return d; }
+    try {
+      const [year, month, day] = d.split('-').map(Number);
+      return format(new Date(year, month - 1, day), "MMM d, yyyy");
+    } catch { return d; }
   };
 
   return (
