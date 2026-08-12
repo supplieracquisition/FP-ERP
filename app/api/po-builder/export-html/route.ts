@@ -126,6 +126,11 @@ export async function POST(request: NextRequest) {
     // Replace client name
     html = html.replace(/Laney Young/g, clientName);
 
+    // Replace delivery address
+    if (deliveryAddress) {
+      html = html.replace(/642 Rebel Dr<br>Oxford, MS 38677, USA/g, deliveryAddress);
+    }
+
     // Replace shipping method
     html = html.replace(/DDP Sea/g, shippingMethod);
 
