@@ -111,25 +111,32 @@ export async function POST(request: NextRequest) {
     html = html.replace(/Jun 7, 2026/g, formatDate(poDate));
     html = html.replace(/Jul 23, 2026/g, formatDate(deliveryDate));
 
-    // Replace supplier details
-    const supplierName = supplier?.name || "Supplier Name";
-    const supplierAddress = supplier?.address || "Supplier Address";
-    const pocName = supplier?.pocName || "Contact Name";
+    // Replace supplier details - only use values if they exist
+    const supplierName = supplier?.name || "";
+    const supplierAddress = supplier?.address || "";
+    const pocName = supplier?.pocName || "";
     const pocPhone = supplier?.pocPhone || "";
     const pocEmail = supplier?.contactEmail || "";
 
     // Replace in Bill To and Ship From sections
-    html = html.replace(/Dongguan Qianlong Clothing Co\., Ltd\./g, supplierName);
-
-    // Replace supplier address (only if supplier has it)
-    if (supplier?.address) {
-      html = html.replace(/8th Floor, No\. 478, Sports Road, Humen Town, Dongguan City, Guangdong Province/g, supplierAddress);
-      html = html.replace(/8th Floor, No\. 478, Sports Road,<br>Humen Town, Dongguan City, Guangdong, China/g, supplierAddress);
+    if (supplierName) {
+      html = html.replace(/Dongguan Qianlong Clothing Co\., Ltd\./g, supplierName);
     }
 
-    html = html.replace(/Mr Abel Deng/g, pocName);
-    html = html.replace(/goodfacex214@gmail\.com/g, pocEmail);
-    html = html.replace(/\+86 18676073832/g, pocPhone);
+    // Replace supplier address - ALWAYS replace, whether supplier has it or not
+    html = html.replace(/8th Floor, No\. 478, Sports Road, Humen Town, Dongguan City, Guangdong Province/g, supplierAddress);
+    html = html.replace(/8th Floor, No\. 478, Sports Road,<br>Humen Town, Dongguan City, Guangdong, China/g, supplierAddress);
+
+    // Only replace contact details if they exist
+    if (pocName) {
+      html = html.replace(/Mr Abel Deng/g, pocName);
+    }
+    if (pocEmail) {
+      html = html.replace(/goodfacex214@gmail\.com/g, pocEmail);
+    }
+    if (pocPhone) {
+      html = html.replace(/\+86 18676073832/g, pocPhone);
+    }
 
     // Replace client name
     html = html.replace(/Laney Young/g, clientName);
@@ -160,8 +167,11 @@ export async function POST(request: NextRequest) {
     html = html.replace(/390 pcs/g, `${totalUnits} pcs`);
     html = html.replace(/<td colspan="2" class="foot-total">390<\/td>/g, `<td colspan="2" class="foot-total">${totalUnits}</td>`);
 
-    // Replace line items count
-    html = html.replace(/5 styles/g, `${lineItems.length} ${lineItems.length === 1 ? 'style' : 'styles'}`);
+    // Replace line items count in both locations
+    const lineItemsLabel = `${lineItems.length} ${lineItems.length === 1 ? 'style' : 'styles'}`;
+    const lineItemsCount = `${lineItems.length} ${lineItems.length === 1 ? 'line item' : 'line items'}`;
+    html = html.replace(/5 styles/g, lineItemsLabel);
+    html = html.replace(/5 line items/g, lineItemsCount);
 
     // Replace line items
     const lineItemsRows = generateLineItemRows(lineItems);
