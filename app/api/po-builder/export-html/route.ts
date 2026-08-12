@@ -131,13 +131,11 @@ export async function POST(request: NextRequest) {
 
     // Replace line items
     const lineItemsRows = generateLineItemRows(lineItems);
-    html = html.replace(/<tr>[\s\S]*?<td class="itemid">182531B<\/td>[\s\S]*?<\/tr>[\s\S]*?<\/tbody>/m, (match) => {
-      const tbodyStart = match.indexOf("<tbody>");
-      if (tbodyStart !== -1) {
-        return match.substring(0, tbodyStart + 7) + lineItemsRows + "\n      </tbody>";
-      }
-      return match;
-    });
+    const tbodyStart = html.indexOf("<tbody>");
+    const tbodyEnd = html.indexOf("</tbody>");
+    if (tbodyStart !== -1 && tbodyEnd !== -1) {
+      html = html.substring(0, tbodyStart + 7) + "\n" + lineItemsRows + "\n      " + html.substring(tbodyEnd);
+    }
 
     // Replace notes
     const notes = orderInstructions || "- The PO is for making the garment and printing the design on them.\n- We'll need pre production images for this before proceeding with mass production.\n- Print type is listed above.\n- Please send the tracking when the order ships out.\n- Please Blind ship this order.";
