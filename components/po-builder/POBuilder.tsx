@@ -687,6 +687,7 @@ export function POBuilder() {
     try {
       const nominatedSupplierId = lineItems[0]?.orderItem.nominatedSupplierId;
       const supplier = nominatedSupplierId ? suppliers.find((s) => s.id === nominatedSupplierId) ?? null : null;
+      console.log("DEBUG downloadPDF:", { nominatedSupplierId, supplier, allSuppliers: suppliers });
       const processedItems = lineItems.map((li) => ({
         orderItemId: li.orderItem.orderItemId,
         orderName: li.orderItem.orderName,
