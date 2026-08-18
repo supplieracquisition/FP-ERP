@@ -61,16 +61,23 @@ export default function LoginPage() {
           return;
         }
 
-        // Set simple session cookie with user ID
-        if (data.user) {
-          await fetch("/api/auth/set-session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: data.user.id,
-              email: data.user.email,
-            }),
-          });
+        // Exchange the verified Supabase token for a session cookie. The server
+        // re-verifies the token and only issues a cookie for a known account.
+        if (!data.session) {
+          setError("Sign in failed");
+          return;
+        }
+
+        const res = await fetch("/api/auth/set-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ access_token: data.session.access_token }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body.error ?? "Sign in failed");
+          return;
         }
 
         router.push("/orders");

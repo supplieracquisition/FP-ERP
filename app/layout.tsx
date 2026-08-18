@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { BugReportButton } from "@/components/bug-report/BugReportButton";
-import { AuthSync } from "@/components/auth/AuthSync";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,7 +19,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body className={`${inter.className} h-full bg-gray-50 text-gray-900 antialiased`}>
-        <AuthSync />
         {children}
         <Toaster />
         <BugReportButton />
