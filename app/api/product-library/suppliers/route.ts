@@ -3,8 +3,13 @@ import { fpeSuppliers, suppliers, orderItems } from "@/lib/db/schema";
 import { inArray, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { addDays, parseISO } from "date-fns";
+import { requireInternal } from "@/lib/permissions";
 
 export async function POST(request: Request) {
+  // Outside the try: requireInternal signals by throwing, and the catch below
+  // would turn that into a 500 instead of enforcing access.
+  await requireInternal();
+
   try {
     const { styleCodes } = await request.json();
 
