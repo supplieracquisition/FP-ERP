@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { orderItems, csvImports, csvImportErrors, suppliers, users } from "@/lib/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import Papa from "papaparse";
+import { verifyApiKeyFromRequest } from "@/lib/apiKey";
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -68,7 +69,16 @@ const HEADER_MAP: Record<string, string> = {
 };
 
 export async function POST(request: NextRequest) {
-  // N8N endpoint - no auth required (called only by n8n workflow)
+  // Machine endpoint: authenticated by API key, not by session. Checked before
+  // the body is read so an unauthenticated caller cannot reach the parser.
+  const apiKey = await verifyApiKeyFromRequest(request);
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "Invalid or missing API key" },
+      { status: 401 }
+    );
+  }
+
   let text: string;
   const contentType = request.headers.get("content-type") || "";
 
