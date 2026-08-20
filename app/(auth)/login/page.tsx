@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { localAuthEnabled } from "@/lib/auth-mode";
 
 const DEV_USERS = [
@@ -46,11 +46,10 @@ export default function LoginPage() {
         router.push(data.redirect);
         router.refresh();
       } else {
-        // Production: Supabase auth
-        const supabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
+        // Real auth. The @supabase/ssr browser client writes the session to
+        // cookies rather than localStorage, so the server can read it — and
+        // the proxy can refresh it. That is the whole point of Stage 2.
+        const supabase = createClient();
 
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
