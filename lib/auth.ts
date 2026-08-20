@@ -1,9 +1,10 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { users, suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
-import { localAuthEnabled } from "@/lib/auth-mode";
+import { localAuthEnabled, supabaseAuthEnabled } from "@/lib/auth-mode";
 
 export type AppSession = {
   user: {
@@ -41,7 +42,63 @@ async function applyImpersonation(session: AppSession): Promise<AppSession> {
   };
 }
 
-export async function auth(): Promise<AppSession | null> {
+/**
+ * Build a session from a Supabase auth UUID.
+ *
+ * Both auth paths converge here. The `fp-user-id` cookie stores the very same
+ * UUID the Supabase session carries, and both are matched against
+ * `users.auth_id` — same key, same column. That is what makes the fallback
+ * safe: the two paths cannot disagree about who you are, and no user records
+ * need migrating between them.
+ */
+async function sessionForAuthId(authId: string): Promise<AppSession | null> {
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.authId, authId))
+    .limit(1);
+
+  if (!user) return null;
+
+  return {
+    user: {
+      id: String(user.id),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      supplierId: user.supplierId ? String(user.supplierId) : null,
+    },
+  };
+}
+
+/**
+ * The verified Supabase session's user id, or null.
+ *
+ * Verified via getUser(), which checks with the auth server rather than
+ * trusting the cookie's contents.
+ *
+ * This declines, it never rejects: no session, misconfigured env, or Supabase
+ * being unreachable all return null so auth() falls through to `fp-user-id`.
+ * It must never throw — auth() runs on nearly every request, so an exception
+ * escaping here would lock out every user at once.
+ */
+async function supabaseAuthId(): Promise<string | null> {
+  if (!supabaseAuthEnabled) return null;
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) return null;
+    return data.user.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wrapped in cache() so it resolves once per request: requireAuth() runs it on
+ * nearly every render, and the Supabase check is a network round-trip.
+ */
+export const auth = cache(async (): Promise<AppSession | null> => {
   const cookieStore = await cookies();
 
   // Local dev stub (no Supabase env, non-production): cookie-selected user
@@ -63,28 +120,22 @@ export async function auth(): Promise<AppSession | null> {
     return applyImpersonation(session);
   }
 
-  // Real auth: fp-user-id cookie, holding the verified Supabase auth UUID.
-  // Stage 2 adds the Supabase session ahead of this as the preferred path;
-  // this stays as the fallback until it is confirmed unused.
+  // Preferred: the real, verified, refreshing Supabase session.
+  const verifiedAuthId = await supabaseAuthId();
+  if (verifiedAuthId) {
+    const session = await sessionForAuthId(verifiedAuthId);
+    if (session) return applyImpersonation(session);
+    // A valid Supabase user with no account here. Fall through rather than
+    // reject: during Stage 2 an existing fp-user-id cookie must still work.
+  }
+
+  // Fallback: the fp-user-id cookie. Kept until the Supabase path is proven in
+  // production, so this stage cannot lock anyone out. Removed in Stage 6.
   const userIdCookie = cookieStore.get("fp-user-id")?.value;
   if (!userIdCookie) return null;
 
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.authId, userIdCookie))
-    .limit(1);
+  const session = await sessionForAuthId(userIdCookie);
+  if (!session) return null;
 
-  if (!user) return null;
-
-  const session: AppSession = {
-    user: {
-      id: String(user.id),
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      supplierId: user.supplierId ? String(user.supplierId) : null,
-    },
-  };
   return applyImpersonation(session);
-}
+});
