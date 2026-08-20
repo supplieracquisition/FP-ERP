@@ -3,9 +3,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { localAuthEnabled } from "@/lib/auth-mode";
 
 export async function signOut() {
-  if (!process.env.DATABASE_URL) {
+  if (localAuthEnabled) {
     // Local dev: API route handles cookie clearing + redirect
     redirect("/api/local-session");
   }

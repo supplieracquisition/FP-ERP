@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { localAuthEnabled } from "@/lib/auth-mode";
 
 // Local dev only: email+password login (any password accepted in dev mode)
 export async function POST(request: NextRequest) {
-  if (process.env.DATABASE_URL) {
+  if (!localAuthEnabled) {
     return NextResponse.json({ error: "Not available in production" }, { status: 404 });
   }
 
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
 // Local dev only: switch the active user via GET redirect (no server action needed)
 export async function GET(request: NextRequest) {
-  if (process.env.DATABASE_URL) {
+  if (!localAuthEnabled) {
     return NextResponse.json({ error: "Not available in production" }, { status: 404 });
   }
 

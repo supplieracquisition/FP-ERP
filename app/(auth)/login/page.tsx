@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
+import { localAuthEnabled } from "@/lib/auth-mode";
 
 const DEV_USERS = [
   { id: 1, name: "Admin", email: "admin@freshprints.com", role: "admin" },
@@ -23,7 +24,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const isLocalDev = !process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const isLocalDev = localAuthEnabled;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

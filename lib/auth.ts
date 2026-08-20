@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { users, suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
+import { localAuthEnabled } from "@/lib/auth-mode";
 
 export type AppSession = {
   user: {
@@ -43,8 +44,9 @@ async function applyImpersonation(session: AppSession): Promise<AppSession> {
 export async function auth(): Promise<AppSession | null> {
   const cookieStore = await cookies();
 
-  // Local dev mode (no DATABASE_URL): use cookie-selected user (default: id=1).
-  if (!process.env.DATABASE_URL) {
+  // Local dev stub (no Supabase env, non-production): cookie-selected user
+  // (default: id=1). Unreachable on any deploy — see lib/auth-mode.ts.
+  if (localAuthEnabled) {
     const localUserIdStr = cookieStore.get("fp_local_user_id")?.value;
     const userId = localUserIdStr ? Number(localUserIdStr) : 1;
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -61,7 +63,9 @@ export async function auth(): Promise<AppSession | null> {
     return applyImpersonation(session);
   }
 
-  // Production: use fp-user-id cookie (simple cookie-based auth)
+  // Real auth: fp-user-id cookie, holding the verified Supabase auth UUID.
+  // Stage 2 adds the Supabase session ahead of this as the preferred path;
+  // this stays as the fallback until it is confirmed unused.
   const userIdCookie = cookieStore.get("fp-user-id")?.value;
   if (!userIdCookie) return null;
 
