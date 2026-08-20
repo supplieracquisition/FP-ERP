@@ -95,6 +95,27 @@ async function supabaseAuthId(): Promise<string | null> {
 }
 
 /**
+ * TEMPORARY (Stage 2): record which path resolved the session.
+ *
+ * This is the evidence gate for Stage 6. `fp-user-id` may only be removed once
+ * the logs show nothing still resolving through it — a measurement rather than
+ * a guess about who might still hold an old cookie. Grep production logs for
+ * `[auth-path]`.
+ *
+ * Deliberately logs no email or auth UUID: the internal user id is enough to
+ * tell the paths apart, and these lines go to a third-party log drain.
+ *
+ * Delete this together with the fp-user-id fallback.
+ */
+function resolved(
+  path: "supabase" | "fp-user-id" | "local-stub",
+  session: AppSession
+): Promise<AppSession> {
+  console.log(`[auth-path] ${path} user=${session.user.id} role=${session.user.role}`);
+  return applyImpersonation(session);
+}
+
+/**
  * Wrapped in cache() so it resolves once per request: requireAuth() runs it on
  * nearly every render, and the Supabase check is a network round-trip.
  */
@@ -117,14 +138,14 @@ export const auth = cache(async (): Promise<AppSession | null> => {
         supplierId: user.supplierId ? String(user.supplierId) : null,
       },
     };
-    return applyImpersonation(session);
+    return resolved("local-stub", session);
   }
 
   // Preferred: the real, verified, refreshing Supabase session.
   const verifiedAuthId = await supabaseAuthId();
   if (verifiedAuthId) {
     const session = await sessionForAuthId(verifiedAuthId);
-    if (session) return applyImpersonation(session);
+    if (session) return resolved("supabase", session);
     // A valid Supabase user with no account here. Fall through rather than
     // reject: during Stage 2 an existing fp-user-id cookie must still work.
   }
@@ -137,5 +158,5 @@ export const auth = cache(async (): Promise<AppSession | null> => {
   const session = await sessionForAuthId(userIdCookie);
   if (!session) return null;
 
-  return applyImpersonation(session);
+  return resolved("fp-user-id", session);
 });
