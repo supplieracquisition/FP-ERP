@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { suppliers, users } from "@/lib/db/schema";
+import { suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
+import { inviteSupplierUser } from "@/lib/supplierInvite";
 
 export async function PATCH(
   request: NextRequest,
@@ -13,30 +14,20 @@ export async function PATCH(
   const supplierId = Number(id);
   const body = await request.json();
 
-  // Create a supplier portal login
+  // Create a supplier portal login by invitation. Same helper the create form
+  // uses, so there is one account-creation path rather than two that drift.
   if (body.userEmail !== undefined) {
-    if (!body.userName?.trim() || !body.userEmail?.trim()) {
-      return NextResponse.json({ error: "userName and userEmail are required" }, { status: 400 });
-    }
-
-    const existing = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, body.userEmail.trim().toLowerCase()))
-      .limit(1);
-
-    if (existing.length > 0) {
-      return NextResponse.json({ error: "A user with this email already exists" }, { status: 409 });
-    }
-
-    await db.insert(users).values({
-      name: body.userName.trim(),
-      email: body.userEmail.trim().toLowerCase(),
-      role: "supplier",
+    const result = await inviteSupplierUser({
       supplierId,
+      name: body.userName,
+      email: body.userEmail,
     });
 
-    return NextResponse.json({ ok: true });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
+    return NextResponse.json({ ok: true, invited: result.invited });
   }
 
   // Build supplier field updates

@@ -5,9 +5,15 @@ import { supabaseAuthEnabled } from "@/lib/auth-mode";
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public paths don't need auth
+  // Public paths don't need auth.
+  //
+  // /set-password is where invited suppliers land, and it must be reachable
+  // without a session — that is the point of the page. Its Supabase tokens
+  // arrive in the URL fragment, which the browser never sends to the server, so
+  // gating it here would bounce the invitee to /login and discard the tokens.
   const isPublicPath =
     pathname === "/login" ||
+    pathname === "/set-password" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/uploads/");
 
