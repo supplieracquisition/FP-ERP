@@ -7,6 +7,37 @@ import Link from "next/link";
 type SupplierUser = { id: number; name: string; email: string };
 type InternalUser = { id: number; name: string };
 
+/**
+ * The create form's fields, all held as strings — a number input's value is a
+ * string, and "" has to stay distinguishable from 0 so a blank box saves as
+ * "not known yet" rather than a real capacity of zero. The API coerces.
+ */
+type SupplierForm = {
+  name: string;
+  contactEmail: string;
+  testPrintTat: string;
+  productionTime: string;
+  shippingTimeSea: string;
+  shippingTimeAir: string;
+  capacityUnits: string;
+  pocUserId: string;
+  loginName: string;
+  loginEmail: string;
+};
+
+const BLANK_SUPPLIER_FORM: SupplierForm = {
+  name: "",
+  contactEmail: "",
+  testPrintTat: "",
+  productionTime: "",
+  shippingTimeSea: "",
+  shippingTimeAir: "",
+  capacityUnits: "",
+  pocUserId: "",
+  loginName: "",
+  loginEmail: "",
+};
+
 type Supplier = {
   id: number;
   name: string;
@@ -36,40 +67,42 @@ function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () 
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // No password field: the supplier sets their own from the invite email. One
+  // set here would have been discarded anyway — accounts are Supabase Auth
+  // accounts, and nothing in this app stores a password.
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     const res = await fetch(`/api/suppliers/${supplierId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userEmail: email, userPassword: password, userName: name }),
+      body: JSON.stringify({ userEmail: email, userName: name }),
     });
     setSaving(false);
+    const d = await res.json().catch(() => ({}));
     if (res.ok) {
-      toast.success("Login created");
+      toast.success(d.invited === false ? "Local dev login created" : `Invite sent to ${email}`);
       setOpen(false);
-      setEmail(""); setName(""); setPassword("");
+      setEmail(""); setName("");
       onSaved();
     } else {
-      const d = await res.json().catch(() => ({}));
-      toast.error(d.error ?? "Failed to create login");
+      toast.error(d.error ?? "Failed to send invite");
     }
   }
 
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="text-xs text-blue-600 hover:text-blue-800">
-        + Add login
+        + Invite login
       </button>
     );
   }
 
   return (
     <form onSubmit={submit} className="mt-2 space-y-2 p-3 bg-gray-50 rounded-md border border-gray-200">
-      <p className="text-xs font-semibold text-gray-700">New supplier login</p>
+      <p className="text-xs font-semibold text-gray-700">Invite a supplier login</p>
       <input
         value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
         className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
@@ -80,15 +113,13 @@ function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () 
         className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
         required
       />
-      <input
-        type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password"
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
-        required minLength={8}
-      />
+      <p className="text-xs text-gray-500">
+        They&apos;ll get an email to set their own password.
+      </p>
       <div className="flex gap-2">
         <button type="submit" disabled={saving}
           className="text-xs bg-gray-900 text-white px-3 py-1 rounded hover:bg-gray-700 disabled:opacity-50">
-          {saving ? "Creating…" : "Create"}
+          {saving ? "Sending…" : "Send invite"}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="text-xs text-gray-500 hover:text-gray-700">
           Cancel
@@ -146,6 +177,33 @@ function InlineNumber({ label, value, onSave }: {
         {saving && <span className="text-xs text-gray-400">Saving…</span>}
         {saved && !dirty && <span className="text-xs text-green-600">✓</span>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A plain labelled number box for the create form.
+ *
+ * Distinct from InlineNumber, which saves each field on its own as you leave it
+ * — the right behaviour for editing a supplier that already exists, and the
+ * wrong one for a supplier that has no id yet. Here the whole form submits at
+ * once.
+ */
+function FormNumber({ label, value, onChange }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <label className="text-xs text-gray-500 font-medium">{label}</label>
+      <input
+        type="number" min="0" step="1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="—"
+        className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white tabular-nums"
+      />
     </div>
   );
 }
@@ -470,9 +528,11 @@ export function SuppliersManager() {
   const [internalUsers, setInternalUsers] = useState<InternalUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(BLANK_SUPPLIER_FORM);
+
+  const setField = (field: keyof SupplierForm, value: string) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
 
   async function load() {
     const res = await fetch("/api/suppliers");
@@ -492,14 +552,46 @@ export function SuppliersManager() {
     const res = await fetch("/api/suppliers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName, contactEmail: newEmail }),
+      body: JSON.stringify({
+        name: form.name,
+        contactEmail: form.contactEmail,
+        testPrintTat: form.testPrintTat,
+        productionTime: form.productionTime,
+        shippingTimeSea: form.shippingTimeSea,
+        shippingTimeAir: form.shippingTimeAir,
+        capacityUnits: form.capacityUnits,
+        pocUserId: form.pocUserId,
+        loginName: form.loginName,
+        loginEmail: form.loginEmail,
+      }),
     });
     setSaving(false);
-    if (res.ok) {
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      toast.error(data.error ?? "Failed to add supplier");
+      return;
+    }
+
+    // The supplier is saved either way. A failed invite is reported without
+    // discarding the record, so the admin retries the invite alone rather than
+    // re-entering every field.
+    if (data.invite && !data.invite.ok) {
+      toast.error(`Supplier added, but the invite failed: ${data.invite.error}`, { duration: 10000 });
+    } else if (data.invite?.ok) {
+      toast.success(
+        data.invite.invited === false
+          ? "Supplier added with a local dev login"
+          : `Supplier added — invite sent to ${form.loginEmail}`
+      );
+    } else {
       toast.success("Supplier added");
-      setAdding(false); setNewName(""); setNewEmail("");
-      load();
-    } else toast.error("Failed to add supplier");
+    }
+
+    setAdding(false);
+    setForm(BLANK_SUPPLIER_FORM);
+    load();
   }
 
   const active = suppliers.filter((s) => s.active);
@@ -521,24 +613,92 @@ export function SuppliersManager() {
       </div>
 
       {adding && (
-        <form onSubmit={createSupplier} className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
+        <form onSubmit={createSupplier} className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-4">
           <p className="text-sm font-semibold text-gray-900">New Supplier</p>
-          <input
-            value={newName} onChange={(e) => setNewName(e.target.value)}
-            placeholder="Supplier name" required
-            className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700"
-          />
-          <input
-            value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
-            placeholder="Contact email (optional)"
-            className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700"
-          />
+
+          <div className="space-y-2">
+            <input
+              value={form.name} onChange={(e) => setField("name", e.target.value)}
+              placeholder="Supplier name" required
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+            />
+            <input
+              type="email"
+              value={form.contactEmail} onChange={(e) => setField("contactEmail", e.target.value)}
+              placeholder="Contact email (optional)"
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-blue-200 space-y-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Lead Times & Capacity</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FormNumber
+                label="Test print (days)" value={form.testPrintTat}
+                onChange={(v) => setField("testPrintTat", v)}
+              />
+              <FormNumber
+                label="Production time (days)" value={form.productionTime}
+                onChange={(v) => setField("productionTime", v)}
+              />
+              <FormNumber
+                label="Shipping — sea (days)" value={form.shippingTimeSea}
+                onChange={(v) => setField("shippingTimeSea", v)}
+              />
+              <FormNumber
+                label="Shipping — air (days)" value={form.shippingTimeAir}
+                onChange={(v) => setField("shippingTimeAir", v)}
+              />
+              <FormNumber
+                label="Order capacity (orders/day)" value={form.capacityUnits}
+                onChange={(v) => setField("capacityUnits", v)}
+              />
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs text-gray-500 font-medium">POC</label>
+                <select
+                  value={form.pocUserId}
+                  onChange={(e) => setField("pocUserId", e.target.value)}
+                  className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+                >
+                  <option value="">— Unassigned —</option>
+                  {internalUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">Leave blank if not known yet — all editable later.</p>
+          </div>
+
+          <div className="pt-3 border-t border-blue-200 space-y-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Portal Login (optional)</p>
+            <input
+              value={form.loginName} onChange={(e) => setField("loginName", e.target.value)}
+              placeholder="Contact person's name"
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+            />
+            <input
+              type="email"
+              value={form.loginEmail} onChange={(e) => setField("loginEmail", e.target.value)}
+              placeholder="Login email — sends an invite"
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+            />
+            <p className="text-xs text-gray-400">
+              Leave blank to register the supplier now and invite someone later. If filled in, they
+              get an email to set their own password.
+            </p>
+          </div>
+
           <div className="flex gap-2">
             <button type="submit" disabled={saving}
               className="text-sm bg-gray-900 text-white px-4 py-1.5 rounded hover:bg-gray-700 disabled:opacity-50">
               {saving ? "Adding…" : "Add"}
             </button>
-            <button type="button" onClick={() => setAdding(false)} className="text-sm text-gray-500 hover:text-gray-700">
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setForm(BLANK_SUPPLIER_FORM); }}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
               Cancel
             </button>
           </div>
