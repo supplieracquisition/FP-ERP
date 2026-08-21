@@ -45,8 +45,15 @@ function buildConditions(params: URLSearchParams, session: { user: { role: strin
     conditions.push(sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered'`);
   }
 
-  if (isSupplier && session.user.supplierId) {
-    conditions.push(eq(orderItems.supplierId, Number(session.user.supplierId)));
+  if (isSupplier) {
+    // Fails closed. Previously this branch was `isSupplier && supplierId`, so a
+    // supplier account with no supplier_id fell through to the else and matched
+    // every order in the system.
+    conditions.push(
+      session.user.supplierId
+        ? eq(orderItems.supplierId, Number(session.user.supplierId))
+        : sql`1 = 0`
+    );
   } else {
     const supplierIdParam = params.get("supplierId") ?? "";
     if (supplierIdParam === "0") {

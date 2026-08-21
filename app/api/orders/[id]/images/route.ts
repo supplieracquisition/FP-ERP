@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderImages, orderItems, suppliers, users, testPrintQueue } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, denyOrderAccess } from "@/lib/permissions";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
@@ -11,8 +11,12 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await requireAuth();
+  const session = await requireAuth();
   const { id: orderItemId } = await params;
+
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
+
   const imgs = await db
     .select()
     .from(orderImages)
@@ -26,6 +30,12 @@ export async function POST(
 ) {
   const session = await requireAuth();
   const { id: orderItemId } = await params;
+
+  // Checked before the upload is read or written: without this a supplier can
+  // plant a file on another supplier's order, and a test_print upload also
+  // flips that order's status below.
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   const formData = await request.formData();
   const file = formData.get("file") as File | null;

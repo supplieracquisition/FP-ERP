@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, statusHistory, comments, orderImages, suppliers, users } from "@/lib/db/schema";
 import { eq, asc, desc } from "drizzle-orm";
-import { requireAuth, requireInternal } from "@/lib/permissions";
+import { requireAuth, requireInternal, denyOrderAccess } from "@/lib/permissions";
 import { createNotification } from "@/lib/createNotification";
 import { sendTestPrintToChat } from "@/lib/googleChat";
 
@@ -99,6 +99,25 @@ export async function PATCH(
   const session = await requireAuth();
   const { id: orderItemId } = await params;
   const body = await request.json();
+
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
+
+  // Owning an order is not the same as being allowed to change anything on it.
+  // These three are what the supplier UI actually sends; the rest — supplier
+  // assignment, nomination, test-print approval, and the internal date fields —
+  // stay internal-only. Without this, a supplier can assign an order to
+  // themselves and every ownership check above then correctly lets them in.
+  if (session.user.role === "supplier") {
+    const SUPPLIER_EDITABLE = ["column", "trackingNumber", "shippingMethod"];
+    const forbidden = Object.keys(body).filter((k) => !SUPPLIER_EDITABLE.includes(k));
+    if (forbidden.length > 0) {
+      return NextResponse.json(
+        { error: `Not permitted to change: ${forbidden.join(", ")}` },
+        { status: 403 }
+      );
+    }
+  }
 
   const [current] = await db
     .select()

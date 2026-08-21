@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { comments, orderImages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, denyOrderAccess } from "@/lib/permissions";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
@@ -14,6 +14,9 @@ export async function POST(
 ) {
   const session = await requireAuth();
   const { id: orderItemId } = await params;
+
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   const formData = await request.formData();
   const issue = formData.get("issue") as string | null;
