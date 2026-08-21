@@ -6,6 +6,7 @@ import { requireAuth, denyOrderAccess } from "@/lib/permissions";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
+import { orderUploadDir, storedPath, imageUrl } from "@/lib/uploads";
 
 export async function GET(
   _request: NextRequest,
@@ -21,7 +22,15 @@ export async function GET(
     .select()
     .from(orderImages)
     .where(eq(orderImages.orderItemId, orderItemId));
-  return NextResponse.json(imgs);
+
+  // `filePath` is a location on disk now, not a URL, and is not the client's
+  // business — hand back the authenticated URL instead.
+  return NextResponse.json(
+    imgs.map(({ filePath: _filePath, ...img }: { filePath: string; id: number }) => ({
+      ...img,
+      url: imageUrl(orderItemId, img.id),
+    }))
+  );
 }
 
 export async function POST(
@@ -45,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: "Missing file or type" }, { status: 400 });
   }
 
-  const uploadDir = path.join(process.cwd(), "public", "uploads", "orders", orderItemId);
+  const uploadDir = orderUploadDir(orderItemId);
   await mkdir(uploadDir, { recursive: true });
 
   const rawExt = (file.name.split(".").pop() ?? "jpg").toLowerCase();
@@ -61,15 +70,16 @@ export async function POST(
 
   await writeFile(path.join(uploadDir, filename), bytes);
 
-  const urlPath = `/uploads/orders/${orderItemId}/${filename}`;
-
-  await db.insert(orderImages).values({
-    orderItemId,
-    type,
-    filePath: urlPath,
-    fileName: file.name,
-    uploadedBy: Number(session.user.id),
-  });
+  const [inserted] = await db
+    .insert(orderImages)
+    .values({
+      orderItemId,
+      type,
+      filePath: storedPath(orderItemId, filename),
+      fileName: file.name,
+      uploadedBy: Number(session.user.id),
+    })
+    .returning({ id: orderImages.id });
 
   // When a supplier uploads a test print, queue it for batch notification (debounced)
   if (type === "test_print" && session.user.role === "supplier") {
@@ -102,5 +112,5 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({ ok: true, filePath: urlPath });
+  return NextResponse.json({ ok: true, url: imageUrl(orderItemId, inserted.id) });
 }

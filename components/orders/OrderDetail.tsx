@@ -35,7 +35,8 @@ function effectiveColumn(status: string, productionStage: string | null): string
 type OrderImage = {
   id: number;
   type: string;
-  filePath: string;
+  /** Authenticated endpoint, not a static file — see lib/uploads.ts. */
+  url: string;
   fileName: string;
   createdAt: string;
 };
@@ -648,8 +649,8 @@ export function OrderDetail({ orderItemId, suppliers, userRole }: {
             ) : (
               <div className="grid grid-cols-3 gap-2">
                 {testPrints.map((img) => (
-                  <a key={img.id} href={img.filePath} target="_blank" rel="noopener noreferrer">
-                    <img src={img.filePath} alt={img.fileName}
+                  <a key={img.id} href={img.url} target="_blank" rel="noopener noreferrer">
+                    <img src={img.url} alt={img.fileName}
                       className="w-full h-24 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity" />
                   </a>
                 ))}
@@ -669,8 +670,8 @@ export function OrderDetail({ orderItemId, suppliers, userRole }: {
               ) : (
                 <div className="grid grid-cols-3 gap-2">
                   {referenceImages.map((img) => (
-                    <a key={img.id} href={img.filePath} target="_blank" rel="noopener noreferrer">
-                      <img src={img.filePath} alt={img.fileName}
+                    <a key={img.id} href={img.url} target="_blank" rel="noopener noreferrer">
+                      <img src={img.url} alt={img.fileName}
                         className="w-full h-24 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity" />
                     </a>
                   ))}
