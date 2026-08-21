@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors } from "@/lib/db/schema";
 import { eq, and, sql, asc, desc, isNull } from "drizzle-orm";
-import { requireAuth, requireInternal } from "@/lib/permissions";
+import { requireAuth, denyNonAdmin } from "@/lib/permissions";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -177,7 +177,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE() {
-  await requireInternal();
+  // Admin only: this wipes every order, along with its history, comments and
+  // images. It is not part of the routine import flow.
+  const session = await requireAuth();
+  const denied = await denyNonAdmin(session);
+  if (denied) return denied;
+
   // Delete in dependency order
   await db.delete(csvImportErrors);
   await db.delete(csvImports);

@@ -10,7 +10,11 @@ type ImportResult = {
   total: number;
 };
 
-export function CsvImport() {
+export function CsvImport({ userRole }: { userRole?: string }) {
+  // Both clear paths call DELETE /api/orders, which is admin-only. Hiding them
+  // for everyone else beats showing a control that 403s — the "clear first"
+  // one would otherwise fail an import partway through.
+  const isAdmin = userRole === "admin";
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -112,7 +116,7 @@ export function CsvImport() {
       </div>
 
       {/* Options */}
-      {file && !result && (
+      {file && !result && isAdmin && (
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
           <label className="flex items-start gap-3 cursor-pointer">
             <input
@@ -198,6 +202,7 @@ export function CsvImport() {
       )}
 
       {/* Danger zone */}
+      {isAdmin && (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4">
         <h3 className="text-sm font-semibold text-red-800 mb-1">Danger Zone</h3>
         <p className="text-xs text-red-700 mb-3">
@@ -229,6 +234,7 @@ export function CsvImport() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

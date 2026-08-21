@@ -35,6 +35,22 @@ export function isInternal(role: string) {
 }
 
 /**
+ * Admin check for API routes.
+ *
+ * requireAdmin() cannot be used from a route handler: it signals by calling
+ * redirect(), which becomes a 307 rather than a status the caller can act on.
+ * fetch() follows the redirect, lands on a page, and reports res.ok — so a
+ * refused request reads as a successful one. That is exactly wrong for the
+ * destructive endpoints this guards.
+ */
+export async function denyNonAdmin(session: {
+  user: { role: string };
+}): Promise<NextResponse | null> {
+  if (session.user.role === "admin") return null;
+  return NextResponse.json({ error: "Admin only" }, { status: 403 });
+}
+
+/**
  * Per-order access check for API routes.
  *
  * Returns a response to hand straight back to the caller, or null when the
