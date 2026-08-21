@@ -4,6 +4,7 @@ import { testPrintQueue, orderItems, orderImages, suppliers, users } from "@/lib
 import { eq, isNull, and, sql } from "drizzle-orm";
 import { createNotification } from "@/lib/createNotification";
 import { sendTestPrintToChat } from "@/lib/googleChat";
+import { imageUrl } from "@/lib/uploads";
 
 // Process test prints that are queued for notification
 // This should be called every ~1 minute by an external cron service
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
 
         // Get all test print images for this order
         const testPrints = await db
-          .select({ filePath: orderImages.filePath })
+          .select({ id: orderImages.id })
           .from(orderImages)
           .where(
             and(
@@ -83,7 +84,11 @@ export async function POST(request: NextRequest) {
           orderItemId: queuedItem.orderItemId,
           supplierName: supplierInfo?.name ?? "Unknown supplier",
           submittedBy: "Supplier",
-          imageUrls: testPrints.map((t: any) => t.filePath),
+          // Now authenticated URLs: a recipient who is signed in sees the
+          // image, one who is not gets sent to the login page.
+          imageUrls: testPrints.map((t: any) =>
+            imageUrl(queuedItem.orderItemId, t.id)
+          ),
         });
 
         // Mark as notified

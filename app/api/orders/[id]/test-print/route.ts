@@ -4,7 +4,7 @@ import { orderItems, orderImages, suppliers, users } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
 import { unlink } from "fs/promises";
-import path from "path";
+import { absoluteFromStored } from "@/lib/uploads";
 import { createNotification } from "@/lib/createNotification";
 import { sendMail } from "@/lib/email";
 
@@ -48,7 +48,7 @@ export async function POST(
 
   await Promise.allSettled(
     testPrintImgs.map((img) =>
-      unlink(path.join(process.cwd(), "public", img.filePath)).catch(() => {})
+      unlink(absoluteFromStored(img.filePath)).catch(() => {})
     )
   );
 

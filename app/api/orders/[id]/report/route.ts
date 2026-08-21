@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { comments, orderImages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, denyOrderAccess } from "@/lib/permissions";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
 import { createNotification } from "@/lib/createNotification";
+import { orderUploadDir, storedPath } from "@/lib/uploads";
 
 export async function POST(
   request: NextRequest,
@@ -14,6 +15,9 @@ export async function POST(
 ) {
   const session = await requireAuth();
   const { id: orderItemId } = await params;
+
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   const formData = await request.formData();
   const issue = formData.get("issue") as string | null;
@@ -39,7 +43,7 @@ export async function POST(
 
   for (const file of imageFiles) {
     if (!file || file.size === 0) continue;
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "orders", orderItemId);
+    const uploadDir = orderUploadDir(orderItemId);
     await mkdir(uploadDir, { recursive: true });
     const rawExt = (file.name.split(".").pop() ?? "jpg").toLowerCase();
     const isHeic = rawExt === "heic" || rawExt === "heif";
@@ -54,7 +58,7 @@ export async function POST(
     await db.insert(orderImages).values({
       orderItemId,
       type: "report",
-      filePath: `/uploads/orders/${orderItemId}/${filename}`,
+      filePath: storedPath(orderItemId, filename),
       fileName: file.name,
       uploadedBy: userId,
     });

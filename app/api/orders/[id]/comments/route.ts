@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { comments, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "@/lib/permissions";
+import { requireAuth, denyOrderAccess } from "@/lib/permissions";
 import { createNotification } from "@/lib/createNotification";
 
 export async function POST(
@@ -12,6 +12,9 @@ export async function POST(
   const session = await requireAuth();
   const { id: orderItemId } = await params;
   const body = await request.json();
+
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   if (!body.body?.trim()) {
     return NextResponse.json({ error: "Comment body required" }, { status: 400 });

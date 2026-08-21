@@ -33,6 +33,13 @@ tsconfig.tsbuildinfo
 # Vercel
 .vercel
 
+# Uploaded order images — user data, never committed.
+# public/uploads/ is the pre-2026-08-20 location, served with no auth. Two test
+# print images were committed there before this rule existed; they are removed
+# from the index but still need scrubbing from history.
+public/uploads/
+private-uploads/
+
 # One-time import scripts and data artifacts
 import_fabric_data.ts
 fabric_details.csv
