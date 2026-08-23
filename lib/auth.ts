@@ -122,11 +122,15 @@ function resolved(
 export const auth = cache(async (): Promise<AppSession | null> => {
   const cookieStore = await cookies();
 
-  // Local dev stub (no Supabase env, non-production): cookie-selected user
-  // (default: id=1). Unreachable on any deploy — see lib/auth-mode.ts.
+  // Local dev stub: the user named by the cookie, and nobody without one.
+  // Opt-in and unreachable on any deploy — see lib/auth-mode.ts.
+  //
+  // No anonymous default. This used to fall back to user id 1 — an admin — so a
+  // visitor with no cookie at all got an admin session. Missing credentials must
+  // mean no session, never a privileged one, even in a dev-only path.
   if (localAuthEnabled) {
-    const localUserIdStr = cookieStore.get("fp_local_user_id")?.value;
-    const userId = localUserIdStr ? Number(localUserIdStr) : 1;
+    const userId = Number(cookieStore.get("fp_local_user_id")?.value);
+    if (!userId) return null;
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!user) return null;
     const session: AppSession = {
