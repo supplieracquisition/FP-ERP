@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import { requireInternal } from "@/lib/permissions";
+import { requireInternal, denyOrderItemIds } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
-  await requireInternal();
+  const session = await requireInternal();
   const body = await request.json();
   const { orderItemIds, inHandsDate } = body as { orderItemIds: string[]; inHandsDate: string };
 
@@ -16,6 +16,9 @@ export async function POST(request: NextRequest) {
   if (!inHandsDate) {
     return NextResponse.json({ error: "No in-hands date provided" }, { status: 400 });
   }
+
+  const denied = await denyOrderItemIds(session, orderItemIds);
+  if (denied) return denied;
 
   try {
     await db

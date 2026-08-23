@@ -208,10 +208,11 @@ function FormNumber({ label, value, onChange }: {
   );
 }
 
-function SupplierRow({ supplier, onRefresh, internalUsers }: {
+function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
   supplier: Supplier;
   onRefresh: () => void;
   internalUsers: InternalUser[];
+  canReassignPoc: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(supplier.name);
@@ -481,6 +482,8 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">POC Assigned</span>
         <select
           value={supplier.pocUserId ?? ""}
+          disabled={!canReassignPoc}
+          title={canReassignPoc ? undefined : "Only an admin can change a supplier's POC"}
           onChange={async (e) => {
             const val = e.target.value ? parseInt(e.target.value) : null;
             const res = await fetch(`/api/suppliers/${supplier.id}`, {
@@ -491,7 +494,7 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
             if (res.ok) { toast.success("POC updated"); onRefresh(); }
             else toast.error("Failed to update POC");
           }}
-          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
         >
           <option value="">— Unassigned —</option>
           {internalUsers.map((u) => (
@@ -523,7 +526,8 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
   );
 }
 
-export function SuppliersManager() {
+export function SuppliersManager({ userRole }: { userRole: string }) {
+  const isAdmin = userRole === "admin";
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [internalUsers, setInternalUsers] = useState<InternalUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -709,11 +713,11 @@ export function SuppliersManager() {
         <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
       ) : (
         <div className="space-y-3">
-          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} />)}
+          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
           {inactive.length > 0 && (
             <>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 pt-2">Inactive</p>
-              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} />)}
+              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
             </>
           )}
           {suppliers.length === 0 && (

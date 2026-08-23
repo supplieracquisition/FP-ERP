@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import { requireInternal } from "@/lib/permissions";
+import { requireInternal, denyOrderRowIds } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
-  await requireInternal();
+  const session = await requireInternal();
   const body = await request.json();
   const {
     orderItemIds,
@@ -36,6 +36,12 @@ export async function POST(request: NextRequest) {
   if (!productionStage) {
     return NextResponse.json({ error: "No production stage provided" }, { status: 400 });
   }
+
+  // The normal flow assigns out of the unassigned pool, which every internal
+  // user can reach — so this only refuses a request aimed at orders already
+  // belonging to someone else's suppliers.
+  const denied = await denyOrderRowIds(session, orderItemIds);
+  if (denied) return denied;
 
   try {
     await db

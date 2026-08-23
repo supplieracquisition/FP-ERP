@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors } from "@/lib/db/schema";
 import { eq, and, sql, asc, desc, isNull } from "drizzle-orm";
-import { requireAuth, denyNonAdmin } from "@/lib/permissions";
+import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -37,7 +37,7 @@ const BASE_SELECT = {
   deliveryAddress: orderItems.deliveryAddress,
 };
 
-function buildConditions(params: URLSearchParams, session: { user: { role: string; supplierId: string | null } }, includeDelivered: boolean) {
+async function buildConditions(params: URLSearchParams, session: { user: { id: string; role: string; supplierId: string | null } }, includeDelivered: boolean) {
   const conditions = [];
   const isSupplier = session.user.role === "supplier";
 
@@ -45,16 +45,16 @@ function buildConditions(params: URLSearchParams, session: { user: { role: strin
     conditions.push(sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered'`);
   }
 
-  if (isSupplier) {
-    // Fails closed. Previously this branch was `isSupplier && supplierId`, so a
-    // supplier account with no supplier_id fell through to the else and matched
-    // every order in the system.
-    conditions.push(
-      session.user.supplierId
-        ? eq(orderItems.supplierId, Number(session.user.supplierId))
-        : sql`1 = 0`
-    );
-  } else {
+  // Who this session may see at all. Supplier scoping and internal POC scoping
+  // both live in here now; only an admin gets undefined back. Pushed before the
+  // request's own filters so everything below can only ever narrow it further.
+  const scope = await orderScope(session);
+  if (scope) conditions.push(scope);
+
+  if (!isSupplier) {
+    // A supplier filter from the query string. This is an intersection with the
+    // scope above, never an escape from it: an internal user asking for a
+    // supplier they do not handle gets no rows rather than that supplier's work.
     const supplierIdParam = params.get("supplierId") ?? "";
     if (supplierIdParam === "0") {
       conditions.push(isNull(orderItems.supplierId));
@@ -140,7 +140,7 @@ export async function GET(request: NextRequest) {
 
   const isKanban     = searchParams.get("kanban") === "1";
   const showDelivered = searchParams.get("showDelivered") === "1";
-  const where = buildConditions(searchParams, session, isKanban || showDelivered);
+  const where = await buildConditions(searchParams, session, isKanban || showDelivered);
   const orderByClause = buildOrderBy(searchParams.get("sortBy") ?? "");
 
   if (isKanban) {

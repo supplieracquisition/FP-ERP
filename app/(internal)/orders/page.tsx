@@ -1,7 +1,7 @@
-import { requireInternal } from "@/lib/permissions";
+import { requireInternal, scopeSupplierIds } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { OrdersTable } from "@/components/orders/OrdersTable";
 import { KanbanBoard } from "@/components/orders/KanbanBoard";
 import { Suspense } from "react";
@@ -16,10 +16,23 @@ export default async function OrdersPage({
   const { view } = await searchParams;
   const isKanban = view === "kanban";
 
-  const allSuppliers = await db
-    .select({ id: suppliers.id, name: suppliers.name })
-    .from(suppliers)
-    .where(eq(suppliers.active, true));
+  // The supplier filter dropdown. An admin picks from every active supplier; a
+  // team member picks from the ones they handle, since filtering by any other
+  // supplier returns nothing anyway. Cosmetic only — /api/orders enforces the
+  // real scope, and this list is not what makes that safe.
+  const pocIds = session.user.role === "admin" ? null : await scopeSupplierIds(session);
+
+  const allSuppliers =
+    pocIds && pocIds.length === 0
+      ? []
+      : await db
+          .select({ id: suppliers.id, name: suppliers.name })
+          .from(suppliers)
+          .where(
+            pocIds
+              ? and(eq(suppliers.active, true), inArray(suppliers.id, pocIds))
+              : eq(suppliers.active, true)
+          );
 
   return (
     <div>

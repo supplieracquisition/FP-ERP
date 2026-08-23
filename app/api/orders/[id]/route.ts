@@ -54,9 +54,11 @@ export async function GET(
 
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (session.user.role === "supplier" && order.supplierId !== Number(session.user.supplierId)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Was an inline supplier-only check, which let any internal user read any
+  // order. The shared helper covers supplier ownership and internal POC scope
+  // in one rule, so this route cannot drift from the rest.
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   const history = await db
     .select({
@@ -193,8 +195,14 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await requireInternal();
+  const session = await requireInternal();
   const { id: orderItemId } = await params;
+
+  // Deleting an order takes its history, comments and images with it. Scope it
+  // like everything else — being internal is not the same as handling this one.
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
+
   await db.delete(statusHistory).where(eq(statusHistory.orderItemId, orderItemId));
   await db.delete(comments).where(eq(comments.orderItemId, orderItemId));
   await db.delete(orderImages).where(eq(orderImages.orderItemId, orderItemId));
