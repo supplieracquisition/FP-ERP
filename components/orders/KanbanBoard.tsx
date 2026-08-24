@@ -75,8 +75,10 @@ const COLUMN_OPTIONS = [
 ];
 
 function effectiveColumn(item: OrderItem): string {
-  // Only unassigned if no supplier ID (nominated supplier doesn't count)
-  if (item.supplierId === null || item.supplierId === 0 || !item.supplierId) {
+  // The client-side spelling of IN_POOL: in the pool until actually assigned.
+  // Nomination does not take an order out of the pool — it names who should
+  // MAKE it, not who is working it. Keep this in step with lib/claims.ts.
+  if (!item.supplierId) {
     return "unassigned";
   }
   if (item.status === "shipped")   return "shipped";

@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-type Supplier = { id: number; name: string };
-
 const COLUMN_OPTIONS = [
   { value: "sample_production", label: "Sample Production" },
   { value: "fabric_sourcing",   label: "Fabric Sourcing / Cutting" },
@@ -244,8 +242,8 @@ function PdfThumbnail({ templatePdf }: { templatePdf: string }) {
   );
 }
 
-export function OrderDetail({ orderItemId, suppliers, userRole }: {
-  orderItemId: string; suppliers: Supplier[]; userRole: string;
+export function OrderDetail({ orderItemId, userRole }: {
+  orderItemId: string; userRole: string;
 }) {
   const router = useRouter();
   const [order, setOrder] = useState<OrderData | null>(null);
@@ -296,17 +294,6 @@ export function OrderDetail({ orderItemId, suppliers, userRole }: {
     setSaving(false);
     if (res.ok) { toast.success("Stage updated"); load(); }
     else toast.error("Failed to update stage");
-  }
-
-  async function updateSupplier(supplierId: string) {
-    setSaving(true);
-    const res = await fetch(`/api/orders/${orderItemId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ supplierId: supplierId ? parseInt(supplierId) : null }),
-    });
-    setSaving(false);
-    if (res.ok) { toast.success("Manufacturer updated"); load(); }
-    else toast.error("Failed to update manufacturer");
   }
 
   async function saveDateEdit(field: "supplierShipDate" | "inHandsDate" | "testPrintDate") {
@@ -732,22 +719,35 @@ export function OrderDetail({ orderItemId, suppliers, userRole }: {
             </select>
           </div>
 
-          {/* Manufacturer control */}
+          {/* Manufacturer — read-only.
+              This was a dropdown that PATCHed supplierId, which assigned the
+              order outright. Two problems: it bypassed the PO Builder, the only
+              path that holds the processor claim; and while unassigned it was
+              labelled "Nominate Supplier" despite assigning rather than
+              nominating, so picking from it did something other than what it
+              said. Assignment now happens in one place. Nomination still lives
+              on the Kanban card, where it does only what it claims to. */}
           {isInternalUser && (
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-                {order.supplierId ? "Manufacturer" : "Nominate Supplier"}
+                Manufacturer
               </h2>
-              <select value={order.supplierId ?? ""} onChange={(e) => updateSupplier(e.target.value)} disabled={saving}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none">
-                <option value="">Unassigned</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              {order.supplierName && (
-                <p className="text-xs text-gray-500 mt-2">
-                  {order.supplierNickname && <span className="font-semibold text-gray-700">{order.supplierNickname} · </span>}
+              {order.supplierId ? (
+                <p className="text-sm text-gray-900">
+                  {order.supplierNickname && <span className="font-semibold">{order.supplierNickname} · </span>}
                   {order.supplierName}
                 </p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500">Unassigned</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Assign this order by building its PO in the{" "}
+                    <Link href="/po-builder" className="text-blue-600 hover:text-blue-800 underline">
+                      PO Builder
+                    </Link>
+                    .
+                  </p>
+                </>
               )}
             </div>
           )}

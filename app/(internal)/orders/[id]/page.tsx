@@ -1,7 +1,4 @@
 import { requireInternal } from "@/lib/permissions";
-import { db } from "@/lib/db";
-import { suppliers } from "@/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
 import { OrderDetail } from "@/components/orders/OrderDetail";
 
 export default async function OrderDetailPage({
@@ -12,14 +9,9 @@ export default async function OrderDetailPage({
   const session = await requireInternal();
   const { id } = await params;
 
-  const allSuppliers = await db
-    .select({
-      id: suppliers.id,
-      name: suppliers.name,
-    })
-    .from(suppliers)
-    .where(eq(suppliers.active, true))
-    .orderBy(asc(suppliers.name));
-
-  return <OrderDetail orderItemId={id} suppliers={allSuppliers} userRole={session.user.role} />;
+  // The supplier list this used to fetch fed one control: a dropdown that
+  // assigned the order by PATCHing supplierId. That control is gone —
+  // assignment runs through the PO Builder, which holds the processor claim —
+  // so the query went with it.
+  return <OrderDetail orderItemId={id} userRole={session.user.role} />;
 }

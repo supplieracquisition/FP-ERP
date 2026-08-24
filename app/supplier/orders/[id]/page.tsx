@@ -9,5 +9,5 @@ export default async function SupplierOrderDetailPage({
   const session = await requireSupplier();
   const { id } = await params;
 
-  return <OrderDetail orderItemId={id} suppliers={[]} userRole={session.user.role} />;
+  return <OrderDetail orderItemId={id} userRole={session.user.role} />;
 }

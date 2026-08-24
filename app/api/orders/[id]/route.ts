@@ -121,6 +121,30 @@ export async function PATCH(
     }
   }
 
+  // Assigning an order is not a field edit, and this route must not be able to
+  // do it. Assignment goes through POST /api/po-builder/assign-items, which is
+  // the only path that holds the processor claim guard.
+  //
+  // This is load-bearing. Anything in the pool is reachable by every internal
+  // user by design — that is how a shared intake pool works — so an accepted
+  // supplierId here would let any of them assign any pooled order straight past
+  // the claim, and the lock would stop meaning anything. The guard has to sit
+  // on every write that sets supplier_id, not just the one the UI happens to
+  // use.
+  //
+  // Refused loudly rather than dropped silently: a caller still sending this is
+  // running stale code, and a 200 that ignored the field would look like it
+  // worked.
+  if (body.supplierId !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          "supplierId cannot be set here. Assign an order by building its PO in the PO Builder.",
+      },
+      { status: 400 }
+    );
+  }
+
   const [current] = await db
     .select()
     .from(orderItems)
@@ -167,7 +191,8 @@ export async function PATCH(
   if (body.shippingMethod !== undefined) updates.shippingMethod = body.shippingMethod;
   if (body.printerShipDate !== undefined) updates.printerShipDate = body.printerShipDate;
   if (body.delayReason !== undefined) updates.delayReason = body.delayReason;
-  if (body.supplierId !== undefined) updates.supplierId = body.supplierId;
+  // No supplierId here — refused above. Nomination is still editable: it names
+  // the supplier who should MAKE the order and assigns nothing.
   if (body.nominatedSupplierId !== undefined) updates.nominatedSupplierId = body.nominatedSupplierId;
   if (body.requiresTestPrint !== undefined) updates.requiresTestPrint = body.requiresTestPrint;
   if (body.testPrintStatus !== undefined) updates.testPrintStatus = body.testPrintStatus;

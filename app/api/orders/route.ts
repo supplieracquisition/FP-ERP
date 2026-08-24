@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors } from "@/lib/db/schema";
-import { eq, and, sql, asc, desc, isNull } from "drizzle-orm";
+import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
+import { IN_POOL } from "@/lib/claims";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -57,7 +58,7 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
     // supplier they do not handle gets no rows rather than that supplier's work.
     const supplierIdParam = params.get("supplierId") ?? "";
     if (supplierIdParam === "0") {
-      conditions.push(isNull(orderItems.supplierId));
+      conditions.push(IN_POOL);
     } else if (supplierIdParam) {
       conditions.push(eq(orderItems.supplierId, Number(supplierIdParam)));
     }
@@ -67,7 +68,9 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
   const column = params.get("column") ?? "";
   if (column) {
     if (column === "unassigned") {
-      conditions.push(isNull(orderItems.supplierId));
+      // Same expression the scope filter and the claim guard use, imported
+      // rather than rewritten so this cannot drift from them again.
+      conditions.push(IN_POOL);
     } else if (column === "shipped") {
       conditions.push(eq(orderItems.status, "shipped"));
     } else if (column === "completed") {
