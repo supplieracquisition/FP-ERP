@@ -20,6 +20,10 @@ import { format, differenceInDays } from "date-fns";
 import { toast } from "sonner";
 
 type Supplier = { id: number; name: string };
+type TeamMember = { id: number; name: string };
+
+/** How often the board re-reads the server while the tab is visible. */
+const POLL_MS = 20_000;
 
 type OrderItem = {
   id: number;
@@ -48,7 +52,23 @@ type OrderItem = {
   supplierNickname: string | null;
   supplierId: number | null;
   nominatedSupplierId: number | null;
+  processorUserId: number | null;
+  claimedAt: string | null;
+  /** Server-computed. Never re-derive this from claimedAt in the browser — the
+   *  client's clock is not the one the claim write is judged against. */
+  claimActive: boolean;
 };
+
+/**
+ * Is this card locked to somebody else?
+ *
+ * Locked means claimed, live, and not by me. My own claim is not a lock — I can
+ * still work the card — and an expired claim is not a lock either, which is why
+ * this reads the server's claimActive rather than looking at claimedAt.
+ */
+function lockedByOther(item: OrderItem, userId?: number): boolean {
+  return item.claimActive && item.processorUserId !== userId;
+}
 
 // Column = effective stage (status + productionStage combined)
 const COLUMNS = [
@@ -191,8 +211,8 @@ function ShippingToggle({ orderItemId, current, onSaved }: {
   );
 }
 
-function ColumnSelect({ orderItemId, current, onSaved, isSupplier }: {
-  orderItemId: string; current: string; onSaved: () => void; isSupplier?: boolean;
+function ColumnSelect({ orderItemId, current, onSaved, isSupplier, disabled }: {
+  orderItemId: string; current: string; onSaved: () => void; isSupplier?: boolean; disabled?: boolean;
 }) {
   async function change(column: string) {
     const res = await fetch(`/api/orders/${orderItemId}`, {
@@ -208,22 +228,105 @@ function ColumnSelect({ orderItemId, current, onSaved, isSupplier }: {
     : COLUMN_OPTIONS;
 
   return (
-    <select value={current} onChange={(e) => { e.stopPropagation(); change(e.target.value); }}
+    <select value={current} disabled={disabled}
+      onChange={(e) => { e.stopPropagation(); change(e.target.value); }}
       onClick={(e) => e.stopPropagation()}
-      className="mt-1 w-full text-xs border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:border-gray-700 bg-white">
+      className="mt-1 w-full text-xs border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:border-gray-700 bg-white disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed">
       {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
 }
 
-function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = [] }: {
+/**
+ * The claim strip on a pool card: who holds it, or a button to take it.
+ *
+ * Only ever rendered for orders still in the pool. Once a PO is built the
+ * processor is a permanent record rather than a lock, and there is nothing here
+ * to act on.
+ */
+function ClaimBar({ item, userId, userRole, team, onRefresh }: {
+  item: OrderItem; userId?: number; userRole?: string; team: TeamMember[]; onRefresh: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const isAdmin = userRole === "admin";
+  const mine = item.claimActive && item.processorUserId === userId;
+  const locked = lockedByOther(item, userId);
+  const holder = team.find((t) => t.id === item.processorUserId)?.name ?? "Someone else";
+
+  async function act(method: "POST" | "DELETE") {
+    setBusy(true);
+    const res = await fetch(`/api/orders/${item.orderItemId}/claim`, { method });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (res.ok) {
+      toast.success(method === "POST" ? "Order claimed" : "Claim released");
+    } else {
+      // 409 means somebody got there first. Refreshing is part of the message:
+      // the board is about to show the card greyed and the toast explains why.
+      toast.error(data.error ?? "Failed");
+    }
+    onRefresh();
+  }
+
+  if (locked) {
+    return (
+      <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 space-y-1">
+        <div className="text-xs font-semibold text-amber-900">
+          🔒 Claimed by {holder}
+          {item.claimedAt && (
+            <span className="font-normal text-amber-700">
+              {" "}· {format(new Date(item.claimedAt), "MMM d, HH:mm")}
+            </span>
+          )}
+        </div>
+        {isAdmin && (
+          <button
+            onClick={(e) => { e.stopPropagation(); act("DELETE"); }}
+            disabled={busy}
+            className="text-xs font-semibold text-amber-800 underline hover:text-amber-950 disabled:opacity-50">
+            Release claim (admin)
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (mine) {
+    return (
+      <div className="rounded border border-blue-300 bg-blue-50 px-2 py-1.5 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-blue-900">✎ Claimed by you</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); act("DELETE"); }}
+          disabled={busy}
+          className="text-xs font-semibold text-blue-700 underline hover:text-blue-900 disabled:opacity-50">
+          Release
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); act("POST"); }}
+      disabled={busy}
+      className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-500 hover:bg-gray-50 disabled:opacity-50">
+      {busy ? "Claiming…" : "Claim to build PO"}
+    </button>
+  );
+}
+
+function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = [], userId, team = [] }: {
   item: OrderItem; isDragging?: boolean; onRefresh: () => void; userRole?: string; suppliers?: Supplier[];
+  userId?: number; team?: TeamMember[];
 }) {
   const fmt = (d: string | null) => d ? format(new Date(d), "MM/dd/yy") : null;
   const col = effectiveColumn(item);
   const isShipped = item.status === "shipped" || item.status === "completed";
   const isSupplier = userRole === "supplier";
-  const isAdmin = userRole === "admin";
+  const inPool = !item.supplierId;
+  // Locked to someone else: every control on this card is disabled below, and
+  // DraggableCard refuses to make it draggable at all.
+  const locked = lockedByOther(item, userId);
 
   const shipsInDays = item.supplierShipDate
     ? differenceInDays(new Date(item.supplierShipDate), new Date())
@@ -267,8 +370,11 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
   const shipLabel = col === "sample_production" && item.requiresTestPrint ? "TEST PRINT DUE" : "SHIPS";
 
   return (
-    <div className={`bg-white border border-gray-300 rounded p-3 text-xs space-y-1 select-none ${
-      isDragging ? "shadow-xl rotate-1 opacity-90 cursor-grabbing" : "cursor-grab hover:border-gray-400 hover:shadow-sm transition-all"
+    <div className={`bg-white border rounded p-3 text-xs space-y-1 select-none ${
+      locked
+        ? "border-gray-300 opacity-60 cursor-not-allowed"
+        : isDragging ? "border-gray-300 shadow-xl rotate-1 opacity-90 cursor-grabbing"
+        : "border-gray-300 cursor-grab hover:border-gray-400 hover:shadow-sm transition-all"
     }`}>
       {/* Test print approval flag */}
       {item.testPrintStatus === "needs_approval" && !isSupplier && (
@@ -351,6 +457,10 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
 
       {/* Footer */}
       <div className="pt-1.5 border-t border-gray-100 space-y-1">
+        {!isSupplier && inPool && (
+          <ClaimBar item={item} userId={userId} userRole={userRole} team={team} onRefresh={onRefresh} />
+        )}
+
         {!isSupplier && (
           <>
             {item.supplierId ? (
@@ -369,13 +479,14 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
                 </label>
                 <select
                   value={item.nominatedSupplierId ?? ""}
+                  disabled={locked}
                   onChange={(e) => {
                     if (e.target.value) {
                       handleNominateSupplier(e.target.value);
                     }
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                 >
                   <option value="">Select supplier...</option>
                   {suppliers.map((s) => (
@@ -392,6 +503,7 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
           current={col}
           onSaved={onRefresh}
           isSupplier={isSupplier}
+          disabled={locked}
         />
 
         {col === "shipped" && (
@@ -406,9 +518,10 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
   );
 }
 
-function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, onToggleDelivered, deliveredCount, suppliers = [] }: {
+function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, onToggleDelivered, deliveredCount, suppliers = [], userId, team = [] }: {
   column: { id: string; label: string }; items: OrderItem[]; onRefresh: () => void; userRole?: string;
   showDelivered?: boolean; onToggleDelivered?: () => void; deliveredCount?: number; suppliers?: Supplier[];
+  userId?: number; team?: TeamMember[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   return (
@@ -433,28 +546,45 @@ function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, on
       <div ref={setNodeRef}
         className={`flex-1 min-h-[120px] rounded-lg p-2 space-y-2 transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : "bg-gray-100"}`}>
         {items.map((item) => (
-          <DraggableCard key={item.orderItemId} item={item} onRefresh={onRefresh} userRole={userRole} suppliers={suppliers} />
+          <DraggableCard key={item.orderItemId} item={item} onRefresh={onRefresh} userRole={userRole}
+            suppliers={suppliers} userId={userId} team={team} />
         ))}
       </div>
     </div>
   );
 }
 
-function DraggableCard({ item, onRefresh, userRole, suppliers = [] }: { item: OrderItem; onRefresh: () => void; userRole?: string; suppliers?: Supplier[] }) {
+function DraggableCard({ item, onRefresh, userRole, suppliers = [], userId, team = [] }: {
+  item: OrderItem; onRefresh: () => void; userRole?: string; suppliers?: Supplier[];
+  userId?: number; team?: TeamMember[];
+}) {
+  const locked = lockedByOther(item, userId);
+
+  // disabled is what actually prevents the drag. Greying the card out in CSS
+  // only makes it LOOK locked: dnd-kit would still fire drag events, the drop
+  // would still PATCH the column, and the server would still accept it —
+  // anything in the pool is reachable by every internal user, so there is no
+  // second line of defence behind this one. pointer-events:none would stop the
+  // drag but would also kill the admin's Release button on the same card.
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: item.orderItemId, data: { item },
+    id: item.orderItemId,
+    data: { item },
+    disabled: locked,
   });
   const style = transform
     ? { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0 : 1 }
     : undefined;
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <OrderCard item={item} onRefresh={onRefresh} userRole={userRole} suppliers={suppliers} />
+      <OrderCard item={item} onRefresh={onRefresh} userRole={userRole} suppliers={suppliers}
+        userId={userId} team={team} />
     </div>
   );
 }
 
-export function KanbanBoard({ suppliers, userRole }: { suppliers: Supplier[]; userRole?: string }) {
+export function KanbanBoard({ suppliers, userRole, userId, team = [] }: {
+  suppliers: Supplier[]; userRole?: string; userId?: number; team?: TeamMember[];
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [items, setItems] = useState<OrderItem[]>([]);
@@ -474,18 +604,81 @@ export function KanbanBoard({ suppliers, userRole }: { suppliers: Supplier[]; us
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  // Guards against a poll landing on top of work in progress. A drag is
+  // optimistic — handleDragEnd moves the card locally, then PATCHes — so a poll
+  // that resolved mid-flight would overwrite the optimistic state with the
+  // pre-move server copy and the card would visibly snap back.
+  const inFlight = useRef(false);
+  const busy = useRef(false);
+
   const fetchOrders = useCallback(async () => {
-    const params = new URLSearchParams({ kanban: "1" });
-    if (supplierFilter) params.set("supplierId", supplierFilter);
-    const res = await fetch(`/api/orders?${params}`);
-    const data = await res.json();
-    setItems(data.items ?? []);
-    setLoading(false);
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const params = new URLSearchParams({ kanban: "1" });
+      if (supplierFilter) params.set("supplierId", supplierFilter);
+      const res = await fetch(`/api/orders?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setItems(data.items ?? []);
+      setLoading(false);
+    } finally {
+      inFlight.current = false;
+    }
   }, [supplierFilter]);
 
   useEffect(() => { setLoading(true); fetchOrders(); }, [fetchOrders]);
 
+  /**
+   * Keep the board roughly current so a claim someone else takes shows up
+   * without a manual reload.
+   *
+   * Paused whenever the tab is hidden: a board left open on a second monitor
+   * overnight would otherwise poll ~4,300 times for nobody. On becoming visible
+   * it refetches immediately rather than waiting out the interval, so a
+   * returning user is not looking at a stale board for 20 seconds.
+   *
+   * This is comfort, not correctness. Polling only decides how quickly a card
+   * turns grey; whether a claim actually succeeds is settled by the conditional
+   * write in POST /api/orders/[id]/claim, which holds no matter how stale this
+   * view is.
+   */
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer) return;
+      timer = setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        if (busy.current) return;
+        fetchOrders();
+      }, POLL_MS);
+    };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") { fetchOrders(); start(); }
+      else stop();
+    };
+
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVisibility); };
+  }, [fetchOrders]);
+
   async function handleDragEnd(event: DragEndEvent) {
+    // handleDragStart set busy.current. Every exit below — dropped outside a
+    // column, unknown card, same column, refused move, or a completed write —
+    // has to clear it, or one cancelled drag would silently stop polling for
+    // the rest of the session. Hence the single finally wrapping the lot.
+    try {
+      await runDragEnd(event);
+    } finally {
+      busy.current = false;
+    }
+  }
+
+  async function runDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     setActiveItem(null);
     if (!over) return;
@@ -493,6 +686,15 @@ export function KanbanBoard({ suppliers, userRole }: { suppliers: Supplier[]; us
     const orderItemId = active.id as string;
     const item = items.find((i) => i.orderItemId === orderItemId);
     if (!item) return;
+
+    // Belt and braces behind useDraggable({ disabled }). dnd-kit should never
+    // start a drag on a locked card, so reaching here means something changed
+    // under us — most likely a poll landing a fresh claim mid-drag.
+    if (lockedByOther(item, userId)) {
+      toast.error("That order is claimed by someone else");
+      fetchOrders();
+      return;
+    }
 
     const columnIds = ALL_COLUMNS.map((c) => c.id);
     let newColumn: string;
@@ -522,16 +724,24 @@ export function KanbanBoard({ suppliers, userRole }: { suppliers: Supplier[]; us
         : i
     ));
 
-    const res = await fetch(`/api/orders/${orderItemId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ column: newColumn }),
-    });
+    // Held across the write so the poll cannot resolve on top of the optimistic
+    // move above and snap the card back to where it started.
+    busy.current = true;
+    try {
+      const res = await fetch(`/api/orders/${orderItemId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ column: newColumn }),
+      });
 
-    if (res.ok) toast.success(`Moved to ${ALL_COLUMNS.find((c) => c.id === newColumn)?.label ?? newColumn}`);
-    else { toast.error("Failed to move order"); fetchOrders(); }
+      if (res.ok) toast.success(`Moved to ${ALL_COLUMNS.find((c) => c.id === newColumn)?.label ?? newColumn}`);
+      else { toast.error("Failed to move order"); fetchOrders(); }
+    } finally {
+      busy.current = false;
+    }
   }
 
   function handleDragStart(event: DragStartEvent) {
+    busy.current = true;
     setActiveItem(items.find((i) => i.orderItemId === event.active.id) ?? null);
   }
 
@@ -676,12 +886,13 @@ export function KanbanBoard({ suppliers, userRole }: { suppliers: Supplier[]; us
                 showDelivered={col.id === "shipped" ? showDelivered : undefined}
                 onToggleDelivered={col.id === "shipped" ? () => setShowDelivered(!showDelivered) : undefined}
                 deliveredCount={col.id === "shipped" ? grouped["completed"]?.length : undefined}
-                suppliers={suppliers} />
+                suppliers={suppliers} userId={userId} team={team} />
             ))}
           </div>
         </div>
         <DragOverlay>
-          {activeItem && <OrderCard item={activeItem} isDragging onRefresh={() => {}} userRole={userRole} />}
+          {activeItem && <OrderCard item={activeItem} isDragging onRefresh={() => {}} userRole={userRole}
+            userId={userId} team={team} />}
         </DragOverlay>
       </DndContext>
     </div>

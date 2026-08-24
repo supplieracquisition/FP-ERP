@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors } from "@/lib/db/schema";
 import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
-import { IN_POOL } from "@/lib/claims";
+import { IN_POOL, claimable, claimCutoff, claimIsActive } from "@/lib/claims";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -36,7 +36,29 @@ const BASE_SELECT = {
   supplierNickname: suppliers.nickname,
   clientName: orderItems.clientName,
   deliveryAddress: orderItems.deliveryAddress,
+  processorUserId: orderItems.processorUserId,
+  claimedAt: orderItems.claimedAt,
 };
+
+/**
+ * Stamp each row with whether its claim is live.
+ *
+ * Computed here rather than in the browser on purpose. The client's clock is
+ * not the one the claim write will be judged against, so a card that looked
+ * takeable because the viewer's machine was a minute fast would fail the guard
+ * with no explanation. One authority for expiry, and it is this one.
+ *
+ * The holder's NAME is deliberately not joined in. Aliasing a second join onto
+ * users would need drizzle's alias(), which is imported per-dialect — and this
+ * schema switches dialect at runtime, so that import would be wrong on one of
+ * them. The Kanban resolves the id against the team roster it is already given.
+ */
+function withClaimState<T extends { processorUserId: number | null; claimedAt: string | null }>(
+  rows: T[]
+): (T & { claimActive: boolean })[] {
+  const cutoff = claimCutoff();
+  return rows.map((r) => ({ ...r, claimActive: claimIsActive(r, cutoff) }));
+}
 
 async function buildConditions(params: URLSearchParams, session: { user: { id: string; role: string; supplierId: string | null } }, includeDelivered: boolean) {
   const conditions = [];
@@ -80,6 +102,13 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
       conditions.push(sql`${orderItems.supplierId} IS NOT NULL`);
       conditions.push(eq(orderItems.productionStage, column));
     }
+  }
+
+  // What the PO Builder lists: pool orders this user could actually take right
+  // now. Filtering here rather than greying in the builder means you cannot
+  // start assembling a PO around an order that will refuse you at the end.
+  if (params.get("claimable") === "1") {
+    conditions.push(claimable(Number(session.user.id)));
   }
 
   const nominatedSupplierId = params.get("nominatedSupplierId") ?? "";
@@ -154,7 +183,7 @@ export async function GET(request: NextRequest) {
       .leftJoin(suppliers, eq(orderItems.supplierId, suppliers.id))
       .where(where)
       .orderBy(...orderByClause);
-    return NextResponse.json({ items: rows });
+    return NextResponse.json({ items: withClaimState(rows) });
   }
 
   // Paginated table view
@@ -176,7 +205,7 @@ export async function GET(request: NextRequest) {
     .from(orderItems)
     .where(where);
 
-  return NextResponse.json({ items: rows, total: Number(count) });
+  return NextResponse.json({ items: withClaimState(rows), total: Number(count) });
 }
 
 export async function DELETE() {

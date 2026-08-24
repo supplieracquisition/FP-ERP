@@ -104,8 +104,36 @@ export function allClaimable(
 ): SQL {
   return sql`(
     SELECT count(*) FROM ${orderItems}
-    WHERE ${inArray(orderItems.id, ids)} AND ${claimable(userId, cutoff)}
+    WHERE ${inArray(orderItems.id, ids)} AND ${heldBy(userId, cutoff)}
   ) = ${ids.length}`;
+}
+
+/**
+ * In the pool AND actively held by this user — the guard for BUILDING a PO.
+ *
+ * Stricter than claimable(): it requires a live claim of your own, where
+ * claimable() also admits orders nobody holds. The difference is deliberate.
+ * Claiming is how you acquire an order, so claimable() has to let you reach one
+ * that is free. Building a PO is the end of that process, and by then you must
+ * already hold it — the PO Builder claims at add time, so any assignment
+ * arriving without a claim did not come through the flow.
+ *
+ * This was intentionally looser for one deploy: until the PO Builder learned to
+ * claim, a strict check would have refused every assignment and broken the
+ * builder outright. Now that it claims first, the loose branch is closed.
+ *
+ * Note the double duty of the pool check. supplier_id IS NULL is what actually
+ * prevents a double assignment — whoever writes first takes the row out of the
+ * pool and the second matches nothing — so this stays race-safe regardless of
+ * how the processor clause is tuned.
+ */
+export function heldBy(userId: number, cutoff = claimCutoff()): SQL {
+  return sql`(
+    ${IN_POOL}
+    AND ${orderItems.processorUserId} = ${userId}
+    AND ${orderItems.claimedAt} IS NOT NULL
+    AND ${orderItems.claimedAt} >= ${cutoff}
+  )`;
 }
 
 /**

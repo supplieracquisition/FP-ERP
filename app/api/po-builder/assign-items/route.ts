@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { orderItems, statusHistory, suppliers } from "@/lib/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { internalSession, denyOrderRowIds } from "@/lib/permissions";
-import { claimCutoff, claimable, allClaimable } from "@/lib/claims";
+import { claimCutoff, heldBy, allClaimable } from "@/lib/claims";
 
 /**
  * Building the PO: the event that completes a claim and takes an order out of
@@ -110,16 +110,19 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           inArray(orderItems.id, ids),
-          // Per-row: still in the pool, and not held by anybody else.
+          // Per-row: still in the pool, and actively held by THIS user.
           //
-          // Deliberately claimable(me) rather than a strict
-          // processor_user_id = me. The double-assign race is already closed by
-          // the supplier_id IS NULL half — whoever writes first takes the row
-          // out of the pool and the other matches nothing — so the processor
-          // clause is the policy half: you may not build a PO on top of work
-          // someone else is holding. Allowing an unclaimed order through keeps
-          // the PO Builder working in the window before it learns to claim.
-          claimable(me, cutoff),
+          // Now strict. This was claimable(me) for one deploy, which also
+          // admitted unclaimed orders — necessary while the PO Builder did not
+          // yet claim, since a strict check would have refused every
+          // assignment. The builder claims at add time now, so an assignment
+          // with no claim behind it did not come through the flow and is
+          // refused.
+          //
+          // The double-assign race is closed by the pool half either way:
+          // whoever writes first takes the row out of the pool and the second
+          // matches nothing.
+          heldBy(me, cutoff),
           // Whole-request: unless EVERY id qualifies, touch nothing. Without
           // this a bulk update assigns the rows it can reach and reports
           // success, leaving a PO covering orders that were only partly

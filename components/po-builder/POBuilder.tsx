@@ -54,6 +54,9 @@ type OrderItem = {
   deliveryAddress: string | null;
   requiresTestPrint: boolean;
   templatePdf: string | null;
+  processorUserId: number | null;
+  claimedAt: string | null;
+  claimActive: boolean;
 };
 
 type Sizes = { xs: string; s: string; m: string; l: string; xl: string; xxl: string; xxxl: string };
@@ -416,7 +419,10 @@ export function POBuilder() {
 
   const searchOrders = useCallback(async (q: string, nominatedSupplierId: string) => {
     setSearching(true);
-    const params = new URLSearchParams({ limit: "50", column: "unassigned" } as any);
+    // claimable=1, not just unassigned: only orders this user could actually
+    // take. Listing ones held by someone else would invite building a PO around
+    // an order that refuses you at the end.
+    const params = new URLSearchParams({ limit: "50", column: "unassigned", claimable: "1" } as any);
     if (q) params.set("search", q);
     if (nominatedSupplierId) params.set("nominatedSupplierId", nominatedSupplierId);
     const res = await fetch(`/api/orders?${params}`);
@@ -517,6 +523,10 @@ export function POBuilder() {
       },
     ];
 
+    // Every validation runs BEFORE the claim. They only look at data already in
+    // hand, and each one returns early — so claiming first would leave a
+    // 24-hour lock on an order that was never added to the PO, every time
+    // somebody picked a mismatched one.
     const nominated_suppliers_set = new Set(newLineItems.map((li) => li.orderItem.nominatedSupplierId));
     if (nominated_suppliers_set.size > 1) {
       setValidationError("Multiple Nominated Suppliers selection, please check the Board and Try Again");
@@ -532,6 +542,25 @@ export function POBuilder() {
     const deliveryAddresses = new Set(newLineItems.map((li) => li.orderItem.deliveryAddress));
     if (clientNames.size > 1 || deliveryAddresses.size > 1) {
       setValidationError("Client Name and Delivery Address do not match, please check the Order Number and Try Again");
+      return;
+    }
+
+    // Claim at add time, not at export. The lock has to be held for the whole
+    // time the PO is being assembled — claiming at the end would let two people
+    // build the same PO in parallel and only discover it on save, with all the
+    // work already done.
+    //
+    // A 409 here is the ordinary outcome of two people reaching for the same
+    // order at once, so it is phrased as an explanation rather than a failure.
+    const res = await fetch(`/api/orders/${orderItem.orderItemId}/claim`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setValidationError(
+        data.error ?? "That order is no longer available. Refresh and try again."
+      );
+      toast.error(data.claimedBy ? `${data.claimedBy} claimed this order` : "Could not claim order");
+      // Drop it from the results so it cannot be picked again off a stale view.
+      setSearchResults((prev) => prev.filter((r) => r.id !== orderItem.id));
       return;
     }
 
@@ -560,7 +589,21 @@ export function POBuilder() {
     }
   }, [lineItems, fetchFabricsForStyle]);
 
+  /**
+   * Give the claim back when an order is taken off the PO.
+   *
+   * Best-effort on purpose: if the release fails the claim simply expires on
+   * its own within 24 hours, so there is nothing here worth interrupting the
+   * user over. The TTL is the backstop for every path that does not get to run
+   * — closing the tab, a lost connection, a crash.
+   */
+  function releaseClaim(orderItemId: string) {
+    fetch(`/api/orders/${orderItemId}/claim`, { method: "DELETE" }).catch(() => {});
+  }
+
   function removeItem(id: number) {
+    const removed = lineItems.find((li) => li.orderItem.id === id);
+    if (removed) releaseClaim(removed.orderItem.orderItemId);
     setLineItems((prev) => prev.filter((li) => li.orderItem.id !== id));
     setValidationError("");
   }
@@ -589,6 +632,9 @@ export function POBuilder() {
   }
 
   function resetBuilder() {
+    // Hand back everything still held. Without this, clearing a half-built PO
+    // would leave every order on it locked to you for 24 hours.
+    lineItems.forEach((li) => releaseClaim(li.orderItem.orderItemId));
     setLineItems([]);
     setPoNumber("");
     setPoDate(format(new Date(), "yyyy-MM-dd"));
@@ -657,6 +703,23 @@ export function POBuilder() {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         console.error("API error response:", errData);
+
+        // 409: the claim went while this PO was being built — realistically a
+        // tab left open past the 24h TTL, or an admin releasing it. Nothing was
+        // written (assign-items is all-or-nothing), so the recovery is to
+        // refresh the pool and start over rather than retry blindly.
+        if (res.status === 409) {
+          setValidationError(
+            errData.error ??
+              "One or more of these orders is no longer yours to assign. Refresh and rebuild this PO."
+          );
+          toast.error("Claim lost — nothing was assigned");
+          setShowSummary(false);
+          setSaving(false);
+          searchOrders(search, selectedSupplierId);
+          return;
+        }
+
         throw new Error(errData.error || `API error: ${res.status}`);
       }
 

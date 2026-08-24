@@ -1,7 +1,7 @@
 import { requireInternal, scopeSupplierIds } from "@/lib/permissions";
 import { db } from "@/lib/db";
-import { suppliers } from "@/lib/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { suppliers, users } from "@/lib/db/schema";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { OrdersTable } from "@/components/orders/OrdersTable";
 import { KanbanBoard } from "@/components/orders/KanbanBoard";
 import { Suspense } from "react";
@@ -34,6 +34,17 @@ export default async function OrdersPage({
               : eq(suppliers.active, true)
           );
 
+  // Who holds a claim, by id. /api/orders returns processor_user_id but not the
+  // name — a second join onto users needs drizzle's alias(), which is imported
+  // per-dialect, and this schema picks its dialect at runtime. Resolving the id
+  // against the roster here costs one small query and no extra round trip.
+  const team = isKanban
+    ? await db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(ne(users.role, "supplier"))
+    : [];
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -42,7 +53,12 @@ export default async function OrdersPage({
       </div>
       <Suspense>
         {isKanban ? (
-          <KanbanBoard suppliers={allSuppliers} userRole={session.user.role} />
+          <KanbanBoard
+            suppliers={allSuppliers}
+            userRole={session.user.role}
+            userId={Number(session.user.id)}
+            team={team}
+          />
         ) : (
           <OrdersTable suppliers={allSuppliers} userRole={session.user.role} />
         )}

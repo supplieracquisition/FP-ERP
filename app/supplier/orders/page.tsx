@@ -21,7 +21,14 @@ export default async function SupplierOrdersPage({
       </div>
       <Suspense>
         {isKanban ? (
-          <KanbanBoard suppliers={[]} userRole={session.user.role} />
+          // No team roster and no claim UI: a supplier's scope never includes
+          // pool orders, so there is nothing here that could be claimed.
+          <KanbanBoard
+            suppliers={[]}
+            userRole={session.user.role}
+            userId={Number(session.user.id)}
+            team={[]}
+          />
         ) : (
           <OrdersTable suppliers={[]} userRole={session.user.role} />
         )}
