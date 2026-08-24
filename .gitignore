@@ -47,12 +47,14 @@ fabric_colors.csv
 
 # Local SQLite databases — real data, never committed.
 #
-# These patterns stop a *new* database file from being added. They do not
-# protect the ones already here: .gitignore is ignored for paths git already
-# tracks, and fp-erp.db, its -shm/-wal sidecars, and local.db are all tracked
-# today. Closing that needs `git rm --cached` on each (same step the
-# public/uploads/ block above records), and history still needs scrubbing
-# separately.
+# These patterns stop a *new* database file from being added. They do not undo
+# anything: .gitignore has no effect on paths git already tracks, so each one
+# also needed `git rm --cached`. That has now been done for all of them —
+# fp-erp.db and its -shm/-wal sidecars, then fp-erp.db.bak and
+# fp-erp.db.backup-before-migration.
+#
+# Untracking only stops the exposure GROWING. Every byte already committed is
+# still in history and still public; scrubbing that is separate, deferred work.
 *.db
 *.db-shm
 *.db-wal
@@ -62,3 +64,9 @@ fabric_colors.csv
 fp-erp.db
 fp-erp.db-shm
 fp-erp.db-wal
+
+# The backups need naming too. Neither matches *.db — one ends .bak, the other
+# ends -before-migration — so extension patterns miss them, and so does any
+# audit that scans by extension. Both hold real users, suppliers and orders.
+fp-erp.db.bak
+fp-erp.db.backup-before-migration
