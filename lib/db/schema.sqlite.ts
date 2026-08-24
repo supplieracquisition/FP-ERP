@@ -76,7 +76,25 @@ export const orderItems = sqliteTable(
     testPrintDate: text("test_print_date"),
     clientName: text("client_name"),
     deliveryAddress: text("delivery_address"),
-    poCreated: integer("po_created", { mode: "boolean" }).notNull().default(false),
+    // The order PROCESSOR: whoever builds the PO. Deliberately separate from
+    // suppliers.poc_user_id, which is the handler of a SUPPLIER. Anyone
+    // internal can process any order; being POC of it is unrelated.
+    //
+    // Set by claiming and never cleared once the PO is built — it is the
+    // permanent "who processed this" record. Release only applies while the
+    // order is still in the pool.
+    processorUserId: integer("processor_user_id").references(() => users.id),
+    // When the current claim was taken. A claim older than CLAIM_TTL_MS is
+    // treated as abandoned on read, which is why no expiry job exists.
+    //
+    // ALWAYS written from JS as new Date().toISOString(), never a
+    // CURRENT_TIMESTAMP default. Expiry is a string comparison, and SQLite
+    // CURRENT_TIMESTAMP renders as "2026-08-24 12:00:00" while toISOString()
+    // renders "2026-08-24T12:00:00.000Z". Space (0x20) sorts before "T"
+    // (0x54), so a column holding both formats compares wrong and every stale
+    // claim reads as fresh. One format in, or the lock silently stops
+    // expiring. (Same hazard on Postgres — see schema.pg.ts.)
+    claimedAt: text("claimed_at"),
     importedAt: text("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -85,6 +103,7 @@ export const orderItems = sqliteTable(
     index("idx_order_items_supplier_id").on(t.supplierId),
     index("idx_order_items_status").on(t.status),
     index("idx_order_items_due_date").on(t.dueDate),
+    index("idx_order_items_processor").on(t.processorUserId),
   ]
 );
 
