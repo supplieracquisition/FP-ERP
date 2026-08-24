@@ -63,7 +63,28 @@ type Supplier = {
   users: SupplierUser[];
 };
 
-function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () => void }) {
+/**
+ * Invite a supplier portal login.
+ *
+ * Two presentations, one mechanism. A supplier with no login yet gets the
+ * prominent call to action: records are deliberately creatable without a login
+ * (the create form's login fields are optional), so attaching one later is the
+ * expected next step rather than an edge case.
+ *
+ * A supplier that already has a login gets a quiet secondary link instead. A
+ * second contact at the same factory — sampling and production, say — is
+ * supported on purpose: users.supplier_id is many-to-one and this section lists
+ * logins as a set. It is just not the common path, so it does not compete with
+ * the rest of the row.
+ *
+ * Both branches send the identical request. The only uniqueness rule is on the
+ * email itself, enforced server-side by inviteSupplierUser.
+ */
+function AddUserForm({ supplierId, hasLogins, onSaved }: {
+  supplierId: number;
+  hasLogins: boolean;
+  onSaved: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -93,16 +114,25 @@ function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () 
   }
 
   if (!open) {
-    return (
+    return hasLogins ? (
       <button onClick={() => setOpen(true)} className="text-xs text-blue-600 hover:text-blue-800">
-        + Invite login
+        + Add another login
+      </button>
+    ) : (
+      <button
+        onClick={() => setOpen(true)}
+        className="text-xs bg-gray-900 text-white px-3 py-1 rounded hover:bg-gray-700 transition-colors"
+      >
+        Invite to portal
       </button>
     );
   }
 
   return (
     <form onSubmit={submit} className="mt-2 space-y-2 p-3 bg-gray-50 rounded-md border border-gray-200">
-      <p className="text-xs font-semibold text-gray-700">Invite a supplier login</p>
+      <p className="text-xs font-semibold text-gray-700">
+        {hasLogins ? "Add another login" : "Invite to portal"}
+      </p>
       <input
         value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
         className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
@@ -519,7 +549,11 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
           </ul>
         )}
         <div className="mt-2">
-          <AddUserForm supplierId={supplier.id} onSaved={onRefresh} />
+          <AddUserForm
+            supplierId={supplier.id}
+            hasLogins={supplier.users.length > 0}
+            onSaved={onRefresh}
+          />
         </div>
       </div>
     </div>
