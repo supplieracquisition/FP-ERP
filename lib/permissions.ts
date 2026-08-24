@@ -83,6 +83,37 @@ export function denySupplierWrite(session: AppSession | null): NextResponse | nu
   return null;
 }
 
+/**
+ * Self-service check for the routes an internal user edits their OWN account
+ * through.
+ *
+ * requireInternal() cannot be used here for the reason denyNonAdmin() gives
+ * above: it redirects, and a redirect reads as success to fetch().
+ *
+ * Returns null when the session may edit its own user row. Callers then take
+ * the user id from `session.user.id` and never from the URL or body — which is
+ * why these routes carry no [id] segment at all. Editing another team member is
+ * an admin action and belongs in the admin UI, not here.
+ *
+ * The impersonation refusal is not decoration. applyImpersonation() rewrites
+ * `role` to "supplier" but leaves `user.id` as the ADMIN's id, so an
+ * unguarded self-service route reached while previewing a supplier would edit
+ * the admin's own account behind a page claiming to be the supplier's. The role
+ * check below happens to catch that too; this states the reason so neither
+ * check can be removed as redundant.
+ */
+export function denyAccountWrite(session: AppSession | null): NextResponse | null {
+  const refuse = (error: string, status = 403) =>
+    NextResponse.json({ error }, { status });
+
+  if (!session?.user) return refuse("Not signed in", 401);
+  if (session.impersonating)
+    return refuse("Read-only while previewing a supplier account");
+  if (!isInternal(session.user.role)) return refuse("Internal users only");
+
+  return null;
+}
+
 /** The session shape every scoping decision below reads from. */
 type ScopeSession = {
   user: { id: string; role: string; supplierId: string | null };
