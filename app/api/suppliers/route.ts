@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers, users, orderItems } from "@/lib/db/schema";
 import { asc, eq, ne, sql } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
-import { inviteSupplierUser } from "@/lib/supplierInvite";
+import { inviteSupplierUser } from "@/lib/invite";
 
 export async function GET() {
   await requireInternal();

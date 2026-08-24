@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 /**
- * Where a supplier lands from their invite email.
+ * Where an invitee lands from their invite email, and where a password reset
+ * link points. Suppliers and team members both arrive here.
  *
  * Supabase's /auth/v1/verify does the token check and bounces here with the
  * session in the URL fragment (#access_token=…). A fragment never reaches the
@@ -148,7 +149,7 @@ export default function SetPasswordPage() {
           <p className="text-xs font-bold tracking-widest text-gray-400 uppercase mb-1">Fresh Prints</p>
           <h1 className="text-2xl font-bold text-gray-900">Set your password</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Choose a password for your supplier portal account.
+            Choose a password for your Fresh Prints account.
           </p>
         </div>
 

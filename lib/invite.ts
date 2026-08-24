@@ -19,30 +19,38 @@ export type InviteResult = {
   invited?: boolean;
 };
 
+/** Every role an account can be created with. */
+export type InvitableRole = "admin" | "internal" | "supplier";
+
 export type InviteInput = {
-  supplierId: number;
   name: string;
   email: string;
+  role: InvitableRole;
+  /** Required when role is "supplier"; must be null for internal and admin. */
+  supplierId: number | null;
 };
 
 /**
- * Create a supplier portal account by invitation.
+ * Create an account by invitation, for any role.
  *
- * The account this produces can actually sign in, which the previous
- * implementation's could not: it inserted a users row with no auth_id, so the
- * row was rejected outright on Postgres (auth_id is NOT NULL) and, where it did
- * insert, auth() had nothing to match it against — sessions resolve by
- * users.auth_id. It also collected a password and discarded it. The auth_id
- * here comes from Supabase, and the supplier sets their own password from the
- * invite email.
+ * The account this produces can actually sign in, which a plain insert into
+ * `users` cannot: sessions resolve by users.auth_id, so a row without one is
+ * unreachable by auth() — and on Postgres, where auth_id is NOT NULL, the
+ * insert is rejected outright. Both the supplier flow and the team flow have
+ * had that bug; this is the one path that does it correctly, which is why they
+ * now share it rather than each growing their own copy.
+ *
+ * No password is collected anywhere. The invitee sets their own from the email,
+ * so a password never transits this app and nothing here stores one.
  *
  * Never throws for an expected condition; returns a status + message the route
  * can hand straight back so the admin sees why it failed.
  */
-export async function inviteSupplierUser({
-  supplierId,
+export async function inviteUser({
   name,
   email,
+  role,
+  supplierId,
 }: InviteInput): Promise<InviteResult> {
   const cleanName = name?.trim();
   const cleanEmail = email?.trim().toLowerCase();
@@ -50,6 +58,28 @@ export async function inviteSupplierUser({
   if (!cleanName || !cleanEmail) {
     return { ok: false, status: 400, error: "Login name and email are both required" };
   }
+
+  // A supplier login is meaningless without a supplier, and an internal login
+  // must not carry one. The scoping code branches on role before it reads
+  // supplier_id, so a stray value here would not grant access today — it would
+  // just be wrong data waiting to mislead whoever reads the column next.
+  const isSupplier = role === "supplier";
+  if (isSupplier && !supplierId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "A supplier login must be attached to a supplier",
+    };
+  }
+  if (!isSupplier && supplierId != null) {
+    return {
+      ok: false,
+      status: 400,
+      error: "An internal login cannot be attached to a supplier",
+    };
+  }
+
+  const linkedSupplierId = isSupplier ? supplierId : null;
 
   const existing = await db
     .select({ id: users.id })
@@ -68,7 +98,7 @@ export async function inviteSupplierUser({
   if (localAuthEnabled) {
     const [created] = await db
       .insert(users)
-      .values({ name: cleanName, email: cleanEmail, role: "supplier", supplierId })
+      .values({ name: cleanName, email: cleanEmail, role, supplierId: linkedSupplierId })
       .returning({ id: users.id });
     return { ok: true, status: 200, userId: created.id, invited: false };
   }
@@ -78,11 +108,12 @@ export async function inviteSupplierUser({
     return {
       ok: false,
       status: 503,
-      // Stays neutral about what else happened: this helper is called both
-      // while creating a supplier and from "Invite login" on one that already
-      // exists. The create path adds its own "supplier was still saved" note.
+      // Stays neutral about what else happened: this helper runs while creating
+      // a supplier, from "Invite login" on one that already exists, and from
+      // the team page. Each caller adds its own context — the supplier create
+      // path, for instance, notes that the supplier was still saved.
       error:
-        "Supplier logins need SUPABASE_SERVICE_ROLE_KEY, which is not set in this environment.",
+        "Logins need SUPABASE_SERVICE_ROLE_KEY, which is not set in this environment.",
     };
   }
 
@@ -91,7 +122,7 @@ export async function inviteSupplierUser({
     return {
       ok: false,
       status: 500,
-      error: "NEXT_PUBLIC_APP_URL is not set, so the invite has nowhere to send the supplier.",
+      error: "NEXT_PUBLIC_APP_URL is not set, so the invite has nowhere to send them.",
     };
   }
 
@@ -104,7 +135,7 @@ export async function inviteSupplierUser({
     // The common case: a Supabase auth user exists for this address but has no
     // row here (a deleted ERP user, or an address used by another environment
     // sharing the auth project). Linking the two is a deliberate act, not
-    // something to do silently behind an "Add supplier" button.
+    // something to do silently behind an "Add user" button.
     const alreadyRegistered = /already.*registered|already exists/i.test(error?.message ?? "");
     return {
       ok: false,
@@ -122,8 +153,8 @@ export async function inviteSupplierUser({
         authId: data.user.id,
         name: cleanName,
         email: cleanEmail,
-        role: "supplier",
-        supplierId,
+        role,
+        supplierId: linkedSupplierId,
       })
       .returning({ id: users.id });
 
@@ -133,11 +164,30 @@ export async function inviteSupplierUser({
     // invisible in the ERP, and blocking every retry for that address with
     // "already registered".
     await supabaseAdmin.auth.admin.deleteUser(data.user.id).catch(() => {});
-    console.error("inviteSupplierUser: rolled back auth user after insert failed", dbError);
+    console.error("inviteUser: rolled back auth user after insert failed", dbError);
     return {
       ok: false,
       status: 500,
       error: "Could not save the login. The invite was cancelled — try again.",
     };
   }
+}
+
+/**
+ * Invite a supplier portal login.
+ *
+ * A thin wrapper rather than a second implementation, so the supplier call
+ * sites keep their narrower signature — a supplier login always has a supplier
+ * — while the mechanism stays in one place.
+ */
+export async function inviteSupplierUser({
+  supplierId,
+  name,
+  email,
+}: {
+  supplierId: number;
+  name: string;
+  email: string;
+}): Promise<InviteResult> {
+  return inviteUser({ name, email, role: "supplier", supplierId });
 }

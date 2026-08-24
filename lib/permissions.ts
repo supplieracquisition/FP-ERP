@@ -84,6 +84,20 @@ export function denySupplierWrite(session: AppSession | null): NextResponse | nu
 }
 
 /**
+ * The whole admin gate for a route handler: session, then role.
+ *
+ * denyNonAdmin() above assumes a session and would throw on null, and its usual
+ * partner requireAuth() redirects — the 307-reads-as-success trap again, this
+ * time on the no-session branch. This pairs the two safely so that every
+ * refusal, for either reason, comes back as a status the caller can act on.
+ */
+export async function denyUnlessAdmin(): Promise<NextResponse | null> {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  return denyNonAdmin(session);
+}
+
+/**
  * Self-service check for the routes an internal user edits their OWN account
  * through.
  *

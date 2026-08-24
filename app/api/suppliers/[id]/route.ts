@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { inviteSupplierUser } from "@/lib/supplierInvite";
+import { inviteSupplierUser } from "@/lib/invite";
 
 export async function PATCH(
   request: NextRequest,
