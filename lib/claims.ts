@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { inArray, sql, type SQL } from "drizzle-orm";
 import { orderItems } from "@/lib/db/schema";
 
 /**
@@ -75,6 +75,37 @@ export function claimable(userId: number, cutoff = claimCutoff()): SQL {
       OR ${orderItems.claimedAt} < ${cutoff}
     )
   )`;
+}
+
+/**
+ * All-or-nothing guard for a bulk write that must not half-apply.
+ *
+ * A guarded bulk UPDATE whose WHERE matches only some of its ids will assign
+ * two of three line items and report success. This counts how many of the ids
+ * qualify and lets the UPDATE touch nothing unless that is all of them, so the
+ * statement is atomically all-or-nothing.
+ *
+ * Why not a transaction: `db` picks its dialect at runtime, and
+ * db.transaction(async …) is unsupported on the better-sqlite3 driver — it
+ * throws "Transaction function cannot return a promise" and the body never
+ * runs. Code written that way would work in production on Postgres and fail in
+ * local dev, which is also where the tests run. A single statement behaves
+ * identically on both, and needs no lock held across round trips.
+ *
+ * Pass the SAME cutoff to this and to the claimable() in the same statement.
+ * Two calls to claimCutoff() a millisecond apart can disagree about a claim
+ * expiring exactly on the boundary, which would let the count and the row
+ * filter reach different answers.
+ */
+export function allClaimable(
+  ids: number[],
+  userId: number,
+  cutoff = claimCutoff()
+): SQL {
+  return sql`(
+    SELECT count(*) FROM ${orderItems}
+    WHERE ${inArray(orderItems.id, ids)} AND ${claimable(userId, cutoff)}
+  ) = ${ids.length}`;
 }
 
 /**

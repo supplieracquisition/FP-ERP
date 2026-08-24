@@ -129,6 +129,42 @@ export function denyAccountWrite(session: AppSession | null): NextResponse | nul
   return null;
 }
 
+/**
+ * The whole internal gate for a route handler: session, then role, returning
+ * the session so the caller does not have to fetch it twice.
+ *
+ * requireInternal() cannot be used from a route handler for the reason
+ * denyNonAdmin() gives above: it redirects, and a redirect reads as success to
+ * fetch(). A claim endpoint that "succeeded" by landing on a login page would
+ * be a particularly bad way to find that out.
+ *
+ * Returned as a discriminated union rather than NextResponse | null so that
+ * `if (denied) return denied;` narrows `session` to non-null for the rest of
+ * the handler, with no non-null assertion at the call site.
+ *
+ * Impersonation is refused explicitly. applyImpersonation() rewrites `role` to
+ * "supplier" while leaving `user.id` as the ADMIN's, so a claim taken through
+ * a supplier preview would record the admin as processor behind a UI claiming
+ * to be the supplier. The role check below happens to catch that too; this
+ * states the reason so neither check reads as redundant.
+ */
+export async function internalSession(): Promise<
+  { session: AppSession; denied: null } | { session: null; denied: NextResponse }
+> {
+  const refuse = (error: string, status = 403) => ({
+    session: null as null,
+    denied: NextResponse.json({ error }, { status }),
+  });
+
+  const session = await auth();
+  if (!session?.user) return refuse("Not signed in", 401);
+  if (session.impersonating)
+    return refuse("Read-only while previewing a supplier account");
+  if (!isInternal(session.user.role)) return refuse("Internal users only");
+
+  return { session, denied: null };
+}
+
 /** The session shape every scoping decision below reads from. */
 type ScopeSession = {
   user: { id: string; role: string; supplierId: string | null };
