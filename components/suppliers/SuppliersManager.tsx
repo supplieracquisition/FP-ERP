@@ -63,7 +63,28 @@ type Supplier = {
   users: SupplierUser[];
 };
 
-function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () => void }) {
+/**
+ * Invite a supplier portal login.
+ *
+ * Two presentations, one mechanism. A supplier with no login yet gets the
+ * prominent call to action: records are deliberately creatable without a login
+ * (the create form's login fields are optional), so attaching one later is the
+ * expected next step rather than an edge case.
+ *
+ * A supplier that already has a login gets a quiet secondary link instead. A
+ * second contact at the same factory — sampling and production, say — is
+ * supported on purpose: users.supplier_id is many-to-one and this section lists
+ * logins as a set. It is just not the common path, so it does not compete with
+ * the rest of the row.
+ *
+ * Both branches send the identical request. The only uniqueness rule is on the
+ * email itself, enforced server-side by inviteSupplierUser.
+ */
+function AddUserForm({ supplierId, hasLogins, onSaved }: {
+  supplierId: number;
+  hasLogins: boolean;
+  onSaved: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -93,16 +114,25 @@ function AddUserForm({ supplierId, onSaved }: { supplierId: number; onSaved: () 
   }
 
   if (!open) {
-    return (
+    return hasLogins ? (
       <button onClick={() => setOpen(true)} className="text-xs text-blue-600 hover:text-blue-800">
-        + Invite login
+        + Add another login
+      </button>
+    ) : (
+      <button
+        onClick={() => setOpen(true)}
+        className="text-xs bg-gray-900 text-white px-3 py-1 rounded hover:bg-gray-700 transition-colors"
+      >
+        Invite to portal
       </button>
     );
   }
 
   return (
     <form onSubmit={submit} className="mt-2 space-y-2 p-3 bg-gray-50 rounded-md border border-gray-200">
-      <p className="text-xs font-semibold text-gray-700">Invite a supplier login</p>
+      <p className="text-xs font-semibold text-gray-700">
+        {hasLogins ? "Add another login" : "Invite to portal"}
+      </p>
       <input
         value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
         className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
@@ -208,10 +238,11 @@ function FormNumber({ label, value, onChange }: {
   );
 }
 
-function SupplierRow({ supplier, onRefresh, internalUsers }: {
+function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
   supplier: Supplier;
   onRefresh: () => void;
   internalUsers: InternalUser[];
+  canReassignPoc: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(supplier.name);
@@ -481,6 +512,8 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">POC Assigned</span>
         <select
           value={supplier.pocUserId ?? ""}
+          disabled={!canReassignPoc}
+          title={canReassignPoc ? undefined : "Only an admin can change a supplier's POC"}
           onChange={async (e) => {
             const val = e.target.value ? parseInt(e.target.value) : null;
             const res = await fetch(`/api/suppliers/${supplier.id}`, {
@@ -491,7 +524,7 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
             if (res.ok) { toast.success("POC updated"); onRefresh(); }
             else toast.error("Failed to update POC");
           }}
-          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
+          className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed"
         >
           <option value="">— Unassigned —</option>
           {internalUsers.map((u) => (
@@ -516,14 +549,19 @@ function SupplierRow({ supplier, onRefresh, internalUsers }: {
           </ul>
         )}
         <div className="mt-2">
-          <AddUserForm supplierId={supplier.id} onSaved={onRefresh} />
+          <AddUserForm
+            supplierId={supplier.id}
+            hasLogins={supplier.users.length > 0}
+            onSaved={onRefresh}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-export function SuppliersManager() {
+export function SuppliersManager({ userRole }: { userRole: string }) {
+  const isAdmin = userRole === "admin";
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [internalUsers, setInternalUsers] = useState<InternalUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -709,11 +747,11 @@ export function SuppliersManager() {
         <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
       ) : (
         <div className="space-y-3">
-          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} />)}
+          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
           {inactive.length > 0 && (
             <>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 pt-2">Inactive</p>
-              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} />)}
+              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
             </>
           )}
           {suppliers.length === 0 && (

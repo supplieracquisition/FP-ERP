@@ -2,8 +2,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { orderItems } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { orderItems, suppliers } from "@/lib/db/schema";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 export async function requireAuth() {
   const session = await auth();
@@ -50,6 +50,68 @@ export async function denyNonAdmin(session: {
   return NextResponse.json({ error: "Admin only" }, { status: 403 });
 }
 
+/** The session shape every scoping decision below reads from. */
+type ScopeSession = {
+  user: { id: string; role: string; supplierId: string | null };
+};
+
+/**
+ * The suppliers an internal user handles: the ones they are POC of.
+ *
+ * This is the single seam the whole feature turns on. Temporary coverage —
+ * holding someone else's suppliers for a period without permanent
+ * reassignment — lands by unioning its supplier ids into the list returned
+ * here. Every caller below (list query, per-order check, bulk writes) then
+ * inherits it with no edit of its own, so keep this function about nothing
+ * except "which suppliers count as this user's right now".
+ */
+export async function scopeSupplierIds(session: ScopeSession): Promise<number[]> {
+  const rows = await db
+    .select({ id: suppliers.id })
+    .from(suppliers)
+    .where(eq(suppliers.pocUserId, Number(session.user.id)));
+
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Orders belonging to nobody yet: the shared intake pool every internal user
+ * works out of, and what PO Builder lists to assign from.
+ */
+const UNASSIGNED = sql`(${orderItems.supplierId} IS NULL AND ${orderItems.nominatedSupplierId} IS NULL)`;
+
+/**
+ * The order-visibility filter for a session, as a WHERE fragment.
+ *
+ * undefined means "no filter" and is returned for admins ONLY. Every other
+ * branch returns a real restriction, so a caller that forgets to handle
+ * undefined over-filters rather than under-filters.
+ *
+ * Fails closed at both degenerate points:
+ *  - a supplier account with no supplier_id matches nothing (1 = 0)
+ *  - an internal user who is POC of no suppliers gets the unassigned pool
+ *    alone, never an unfiltered result. Being POC of nothing narrows what you
+ *    see; it can never widen it.
+ */
+export async function orderScope(session: ScopeSession): Promise<SQL | undefined> {
+  if (session.user.role === "admin") return undefined;
+
+  if (session.user.role === "supplier") {
+    return session.user.supplierId
+      ? eq(orderItems.supplierId, Number(session.user.supplierId))
+      : sql`1 = 0`;
+  }
+
+  const pocIds = await scopeSupplierIds(session);
+  if (pocIds.length === 0) return UNASSIGNED;
+
+  return sql`(
+    ${inArray(orderItems.supplierId, pocIds)}
+    OR ${inArray(orderItems.nominatedSupplierId, pocIds)}
+    OR ${UNASSIGNED}
+  )`;
+}
+
 /**
  * Per-order access check for API routes.
  *
@@ -59,34 +121,102 @@ export async function denyNonAdmin(session: {
  *   const denied = await denyOrderAccess(session, orderItemId);
  *   if (denied) return denied;
  *
- * This is the rule `GET /api/orders/[id]` already applied inline, extracted so
- * every order route enforces the same one. `/api/*` is exempt from the proxy
- * gate, so a route that omits this check has no other net beneath it.
+ * `/api/*` is exempt from the proxy gate, so a route that omits this check has
+ * no other net beneath it.
  *
- * Fails closed: a supplier account with no supplier_id matches no order at all,
- * rather than falling through to an unfiltered result.
- *
- * Internal and admin sessions pass for any existing order — scoping team
- * members to assigned suppliers is not implemented, and there is no assignment
- * model to implement it against yet.
+ * This is the row-level twin of orderScope() and must agree with it: an order
+ * the list query hides is an order this rejects. The two are written out
+ * separately because one runs in SQL over many rows and the other in TS over
+ * one, but they encode the same rule — change them together.
  */
 export async function denyOrderAccess(
-  session: { user: { role: string; supplierId: string | null } },
+  session: ScopeSession,
   orderItemId: string
 ): Promise<NextResponse | null> {
   const [order] = await db
-    .select({ supplierId: orderItems.supplierId })
+    .select({
+      supplierId: orderItems.supplierId,
+      nominatedSupplierId: orderItems.nominatedSupplierId,
+    })
     .from(orderItems)
     .where(eq(orderItems.orderItemId, orderItemId))
     .limit(1);
 
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (session.user.role !== "supplier") return null;
+  const forbidden = NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const ownsIt =
-    Boolean(session.user.supplierId) &&
-    order.supplierId === Number(session.user.supplierId);
+  if (session.user.role === "admin") return null;
 
-  return ownsIt ? null : NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (session.user.role === "supplier") {
+    const ownsIt =
+      Boolean(session.user.supplierId) &&
+      order.supplierId === Number(session.user.supplierId);
+    return ownsIt ? null : forbidden;
+  }
+
+  // Internal. Unassigned is everyone's, so check it before the POC lookup —
+  // an internal user who is POC of nothing still works the intake pool.
+  if (order.supplierId === null && order.nominatedSupplierId === null) return null;
+
+  const pocIds = await scopeSupplierIds(session);
+  const inScope =
+    (order.supplierId !== null && pocIds.includes(order.supplierId)) ||
+    (order.nominatedSupplierId !== null && pocIds.includes(order.nominatedSupplierId));
+
+  return inScope ? null : forbidden;
+}
+
+/**
+ * Scope check for the bulk writes that take an array of ids.
+ *
+ * Counts how many of the submitted rows the session can actually reach and
+ * refuses the whole request unless that is all of them — a partial write here
+ * would silently edit some orders and skip others with a 200, which reads as
+ * success. Ids that do not exist also fail the count, deliberately: the caller
+ * asked to write rows that cannot be written.
+ */
+async function denyIdsOutOfScope(
+  session: ScopeSession,
+  keyed: SQL,
+  expected: number
+): Promise<NextResponse | null> {
+  const scope = await orderScope(session);
+  const where = scope ? and(keyed, scope) : keyed;
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(orderItems)
+    .where(where);
+
+  if (Number(count) !== expected) {
+    return NextResponse.json(
+      { error: "One or more of those orders are not yours to change" },
+      { status: 403 }
+    );
+  }
+
+  return null;
+}
+
+/** Bulk scope check keyed on the numeric order_items.id. */
+export async function denyOrderRowIds(
+  session: ScopeSession,
+  ids: number[]
+): Promise<NextResponse | null> {
+  const unique = [...new Set(ids)];
+  return denyIdsOutOfScope(session, inArray(orderItems.id, unique), unique.length);
+}
+
+/** Bulk scope check keyed on the text order_items.order_item_id. */
+export async function denyOrderItemIds(
+  session: ScopeSession,
+  orderItemIds: string[]
+): Promise<NextResponse | null> {
+  const unique = [...new Set(orderItemIds)];
+  return denyIdsOutOfScope(
+    session,
+    inArray(orderItems.orderItemId, unique),
+    unique.length
+  );
 }

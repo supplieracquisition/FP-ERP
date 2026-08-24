@@ -9,10 +9,21 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await requireInternal();
+  const session = await requireInternal();
   const { id } = await params;
   const supplierId = Number(id);
   const body = await request.json();
+
+  // poc_user_id is the permanent-reassignment control, and reassignment decides
+  // who can see which orders. Left open to any internal user, a team member
+  // could name themselves POC of every supplier and read the whole board — so
+  // this one field is admin-only while the rest of the form stays editable.
+  if (body.pocUserId !== undefined && session.user.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only an admin can change a supplier's POC" },
+      { status: 403 }
+    );
+  }
 
   // Create a supplier portal login by invitation. Same helper the create form
   // uses, so there is one account-creation path rather than two that drift.

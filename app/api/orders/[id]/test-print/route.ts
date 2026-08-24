@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, orderImages, suppliers, users } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { requireInternal } from "@/lib/permissions";
+import { requireInternal, denyOrderAccess } from "@/lib/permissions";
 import { unlink } from "fs/promises";
 import { absoluteFromStored } from "@/lib/uploads";
 import { createNotification } from "@/lib/createNotification";
@@ -20,6 +20,10 @@ export async function POST(
 ) {
   const session = await requireInternal();
   const { id: orderItemId } = await params;
+
+  // Rejecting a test print unlinks image files from disk. Scoped like the rest.
+  const denied = await denyOrderAccess(session, orderItemId);
+  if (denied) return denied;
 
   const [order] = await db
     .select({

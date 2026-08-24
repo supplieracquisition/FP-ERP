@@ -44,3 +44,21 @@ private-uploads/
 import_fabric_data.ts
 fabric_details.csv
 fabric_colors.csv
+
+# Local SQLite databases — real data, never committed.
+#
+# These patterns stop a *new* database file from being added. They do not
+# protect the ones already here: .gitignore is ignored for paths git already
+# tracks, and fp-erp.db, its -shm/-wal sidecars, and local.db are all tracked
+# today. Closing that needs `git rm --cached` on each (same step the
+# public/uploads/ block above records), and history still needs scrubbing
+# separately.
+*.db
+*.db-shm
+*.db-wal
+
+# Named explicitly as well: fp-erp.db is the live copy — real users, suppliers
+# and orders — and the file this rule exists for.
+fp-erp.db
+fp-erp.db-shm
+fp-erp.db-wal
