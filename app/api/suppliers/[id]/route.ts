@@ -2,14 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireInternal } from "@/lib/permissions";
+import { auth } from "@/lib/auth";
 import { inviteSupplierUser } from "@/lib/supplierInvite";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireInternal();
+  // Not requireInternal(): it signals by redirect(), which a route handler
+  // turns into a 307 to a page. The write does abort — redirect() throws — but
+  // fetch() follows the hop, lands on HTML and reports res.ok, so a refused
+  // request reads as a successful one. Same reasoning as denyNonAdmin().
+  //
+  // This is the internal-facing editor, and it can write the operational
+  // fields. A supplier reaching it must be refused outright; their own,
+  // narrower path is PATCH /api/supplier/profile.
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
+  if (session.user.role === "supplier") {
+    return NextResponse.json(
+      { error: "Suppliers cannot edit supplier records" },
+      { status: 403 }
+    );
+  }
+
   const { id } = await params;
   const supplierId = Number(id);
   const body = await request.json();

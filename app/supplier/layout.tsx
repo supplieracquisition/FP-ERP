@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireSupplier } from "@/lib/permissions";
 import { signOut } from "@/lib/actions/auth";
 import { stopImpersonating } from "@/lib/actions/impersonate";
@@ -40,7 +41,23 @@ export default async function SupplierLayout({ children }: { children: React.Rea
       )}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-screen-2xl px-6 flex h-14 items-center justify-between">
-          <span className="font-bold text-sm tracking-wide">FRESH PRINTS</span>
+          <div className="flex items-center gap-6">
+            <span className="font-bold text-sm tracking-wide">FRESH PRINTS</span>
+            <nav className="flex items-center gap-4">
+              <Link
+                href="/supplier/orders"
+                className="text-xs text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Orders
+              </Link>
+              <Link
+                href="/supplier/account"
+                className="text-xs text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Account
+              </Link>
+            </nav>
+          </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
               {pocName && <div className="text-xs font-medium text-gray-700">{pocName}</div>}

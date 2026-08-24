@@ -74,7 +74,13 @@ export default async function InternalLayout({
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-xs text-gray-500">{session.user.email}</span>
+            <Link
+              href="/account"
+              className="text-xs text-gray-500 hover:text-gray-900 transition-colors"
+              title="Your account"
+            >
+              {session.user.email}
+            </Link>
             <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 capitalize">
               {session.user.role}
             </span>
