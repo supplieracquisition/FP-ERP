@@ -8,6 +8,10 @@ type ImportResult = {
   successCount: number;
   errorCount: number;
   total: number;
+  // Columns in the file that map to no field. Surfaced rather than hidden: an
+  // unmapped column is dropped silently and the import still reports success,
+  // which is how the sheet's units and value columns went missing unnoticed.
+  ignoredHeaders?: string[];
 };
 
 export function CsvImport({ userRole }: { userRole?: string }) {
@@ -184,6 +188,21 @@ export function CsvImport({ userRole }: { userRole?: string }) {
               <div className="text-xs text-gray-500 mt-0.5">Errors</div>
             </div>
           </div>
+          {result.ignoredHeaders && result.ignoredHeaders.length > 0 && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+              <strong>
+                {result.ignoredHeaders.length} column
+                {result.ignoredHeaders.length === 1 ? "" : "s"} not imported:
+              </strong>{" "}
+              {result.ignoredHeaders.join(", ")}
+              <div className="text-xs mt-1 text-amber-700">
+                These headers match no field in the ERP, so their data was skipped. If one of
+                them should have been imported, its column title has probably been reworded in
+                the sheet.
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <a
               href="/orders"
