@@ -6,10 +6,15 @@ import { requireInternal } from "@/lib/permissions";
 import { ensureApiKeysTable } from "@/lib/db/ensure-tables";
 import Papa from "papaparse";
 import crypto from "crypto";
-
-function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
-}
+import {
+  HEADER_MAP,
+  normalizeHeader,
+  suppliedFields,
+  PARSE,
+  unmappedHeaders,
+  buildSupplierIndex,
+  resolveSupplier,
+} from "@/lib/import-mapping";
 
 async function verifyApiKey(keyString: string): Promise<boolean> {
   try {
@@ -25,65 +30,6 @@ async function verifyApiKey(keyString: string): Promise<boolean> {
     return false;
   }
 }
-
-const HEADER_MAP: Record<string, string> = {
-  order_id: "orderId",
-  orderid: "orderId",
-  order_item_id: "orderItemId",
-  orderitemid: "orderItemId",
-  item_id: "orderItemId",
-  order_name: "orderName",
-  name: "orderName",
-  order_created_at: "orderCreatedAt",
-  created_at: "orderCreatedAt",
-  style_code: "styleCode",
-  style: "styleCode",
-  color: "color",
-  apparel_color: "color",
-  garment_color: "color",
-  template_pdf: "templatePdf",
-  pdf: "templatePdf",
-  printer_ship_date: "printerShipDate",
-  ship_date: "printerShipDate",
-  print_ship_date: "printerShipDate",
-  original_printer_ship_date: "originalPrinterShipDate",
-  original_ship_date: "originalPrinterShipDate",
-  due_date: "dueDate",
-  order_due_date: "dueDate",
-  print_type: "printType",
-  print_locations: "printLocations",
-  decorating_methods: "decoratingMethods",
-  decoration_methods: "decoratingMethods",
-  quantity: "quantity",
-  qty: "quantity",
-  units: "quantity",
-  total_units_ordered: "quantity",
-  total_number_of_units_ordered: "quantity",
-  total_units: "quantity",
-  order_units: "quantity",
-  total_value: "totalValue",
-  value: "totalValue",
-  order_value: "totalValue",
-  total_order_value: "totalValue",
-  total_order_item_total: "totalValue",
-  order_item_value: "totalValue",
-  item_value: "totalValue",
-  requires_test_print: "requiresTestPrint",
-  test_print: "requiresTestPrint",
-  tracking_number: "trackingNumber",
-  tracking: "trackingNumber",
-  shipping_method: "shippingMethod",
-  client_name: "clientName",
-  client: "clientName",
-  delivery_address: "deliveryAddress",
-  address: "deliveryAddress",
-  order_address: "deliveryAddress",
-  "order address": "deliveryAddress",
-  printer_name: "supplierName",
-  printer: "supplierName",
-  supplier_name: "supplierName",
-  supplier: "supplierName",
-};
 
 export async function POST(request: NextRequest) {
   // Allow either cookie-based auth or API key auth
@@ -161,9 +107,15 @@ export async function POST(request: NextRequest) {
   let successCount = 0;
   let errorCount = 0;
 
+  // Which fields this file can speak to. Anything outside this set is left
+  // alone on update rather than written as null — see suppliedFields().
+  const headers = Object.keys(rawRows[0] ?? {});
+  const present = suppliedFields(headers);
+  const ignoredHeaders = unmappedHeaders(headers);
+
   // Pre-fetch all suppliers for quick lookup
   const allSuppliers = await db.select({ id: suppliers.id, name: suppliers.name }).from(suppliers);
-  const supplierByName = new Map<string, number>(allSuppliers.map((s: any) => [s.name.toLowerCase(), s.id]));
+  const supplierIndex = buildSupplierIndex(allSuppliers as { id: number; name: string }[]);
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx];
@@ -190,38 +142,50 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Look up supplier ID if supplier name is provided
-      let supplierId: number | null = null;
-      const supplierName = mapped.supplierName?.trim();
-      if (supplierName) {
-        supplierId = supplierByName.get(supplierName.toLowerCase()) || null;
+      // Only fields this CSV actually carries. A field the file omits is not
+      // written at all, so an absent column cannot blank out live data.
+      const values: Record<string, unknown> = { orderId, orderItemId };
+      for (const field of present) {
+        if (field === "orderId" || field === "orderItemId" || field === "supplierName") continue;
+        const raw = mapped[field]?.trim() ?? "";
+        values[field] = PARSE[field] ? PARSE[field](raw) : raw || null;
       }
 
-      const values = {
-        orderId,
-        orderItemId,
-        orderName: mapped.orderName?.trim() || null,
-        orderCreatedAt: mapped.orderCreatedAt?.trim() || null,
-        styleCode: mapped.styleCode?.trim() || null,
-        color: mapped.color?.trim() || null,
-        templatePdf: mapped.templatePdf?.trim() || null,
-        printerShipDate: mapped.printerShipDate?.trim() || null,
-        originalPrinterShipDate: mapped.originalPrinterShipDate?.trim() || null,
-        dueDate: mapped.dueDate?.trim() || null,
-        printType: mapped.printType?.trim() || null,
-        printLocations: mapped.printLocations ? parseInt(mapped.printLocations) || null : null,
-        decoratingMethods: mapped.decoratingMethods?.trim() || null,
-        quantity: mapped.quantity ? parseInt(mapped.quantity) || null : null,
-        totalValue: mapped.totalValue ? parseFloat(mapped.totalValue) || null : null,
-        requiresTestPrint: mapped.requiresTestPrint
-          ? ["true", "yes", "1"].includes(mapped.requiresTestPrint.toLowerCase())
-          : false,
-        trackingNumber: mapped.trackingNumber?.trim() || null,
-        shippingMethod: mapped.shippingMethod?.trim() || null,
-        clientName: mapped.clientName?.trim() || null,
-        deliveryAddress: mapped.deliveryAddress?.trim() || null,
-        supplierId: supplierId,
-      };
+      // Assignment. Three distinct cases, and collapsing any two of them is
+      // what made the previous version destructive:
+      //
+      //   blank printer   -> genuinely unassigned; return it to the pool
+      //   named + matched -> assign, and move it into sample production
+      //   named + unknown -> a name we failed to resolve is NOT evidence the
+      //                      order is unassigned. Report it and touch nothing.
+      //
+      // Skipped entirely when the file has no printer column, so a CSV that
+      // does not discuss assignment cannot silently un-assign every row.
+      if (present.has("supplierName")) {
+        const supplierName = mapped.supplierName?.trim();
+
+        if (!supplierName) {
+          values.supplierId = null;
+          // A claim outlives the assignment it was taken under. Left set, the
+          // row returns to the pool already greyed out for everyone but its
+          // former holder; claimable() reads a null claimed_at as takeable.
+          values.claimedAt = null;
+        } else {
+          const resolved = resolveSupplier(supplierName, supplierIndex);
+          if (resolved.kind === "unmatched") {
+            await db.insert(csvImportErrors).values({
+              importId,
+              rowNumber: rowIdx + 2,
+              rawData: JSON.stringify(row),
+              errorMessage: resolved.reason,
+            });
+            errorCount++;
+            continue;
+          }
+          values.supplierId = resolved.supplierId;
+          values.productionStage = "sample_production";
+        }
+      }
 
       const [existing] = await db
         .select({ id: orderItems.id })
@@ -230,19 +194,20 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (existing) {
-        // Update order data but preserve status/productionStage
+        // Status is preserved; productionStage only moves when this row
+        // assigned a supplier above.
         await db
           .update(orderItems)
           .set({ ...values, updatedAt: new Date().toISOString() })
           .where(eq(orderItems.orderItemId, orderItemId));
       } else {
         await db.insert(orderItems).values({
-          ...values,
           status: "in_production",
           productionStage: "sample_production",
+          ...values,
           importedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        } as typeof orderItems.$inferInsert);
       }
 
       successCount++;
@@ -262,5 +227,15 @@ export async function POST(request: NextRequest) {
     .set({ successCount, errorCount, status: "done" })
     .where(eq(csvImports.id, importId));
 
-  return NextResponse.json({ importId, successCount, errorCount, total: rows.length });
+  // ignoredHeaders is reported rather than swallowed. A column whose title has
+  // drifted out of HEADER_MAP is dropped silently and the import still says it
+  // succeeded, which is exactly how the sheet's units and value columns went
+  // missing for a long time without anyone noticing.
+  return NextResponse.json({
+    importId,
+    successCount,
+    errorCount,
+    total: rows.length,
+    ignoredHeaders,
+  });
 }

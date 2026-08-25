@@ -4,69 +4,10 @@ import { orderItems, csvImports, csvImportErrors, suppliers, users } from "@/lib
 import { eq, desc, sql } from "drizzle-orm";
 import Papa from "papaparse";
 import { verifyApiKeyFromRequest } from "@/lib/apiKey";
-
-function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
-}
-
-const HEADER_MAP: Record<string, string> = {
-  order_id: "orderId",
-  orderid: "orderId",
-  order_item_id: "orderItemId",
-  orderitemid: "orderItemId",
-  item_id: "orderItemId",
-  order_name: "orderName",
-  name: "orderName",
-  order_created_at: "orderCreatedAt",
-  created_at: "orderCreatedAt",
-  style_code: "styleCode",
-  style: "styleCode",
-  color: "color",
-  apparel_color: "color",
-  garment_color: "color",
-  template_pdf: "templatePdf",
-  pdf: "templatePdf",
-  printer_ship_date: "printerShipDate",
-  ship_date: "printerShipDate",
-  print_ship_date: "printerShipDate",
-  original_printer_ship_date: "originalPrinterShipDate",
-  original_ship_date: "originalPrinterShipDate",
-  due_date: "dueDate",
-  order_due_date: "dueDate",
-  print_type: "printType",
-  print_locations: "printLocations",
-  decorating_methods: "decoratingMethods",
-  decoration_methods: "decoratingMethods",
-  quantity: "quantity",
-  qty: "quantity",
-  units: "quantity",
-  total_units_ordered: "quantity",
-  total_number_of_units_ordered: "quantity",
-  total_units: "quantity",
-  order_units: "quantity",
-  total_value: "totalValue",
-  value: "totalValue",
-  order_value: "totalValue",
-  total_order_value: "totalValue",
-  total_order_item_total: "totalValue",
-  order_item_value: "totalValue",
-  item_value: "totalValue",
-  requires_test_print: "requiresTestPrint",
-  test_print: "requiresTestPrint",
-  tracking_number: "trackingNumber",
-  tracking: "trackingNumber",
-  shipping_method: "shippingMethod",
-  client_name: "clientName",
-  client: "clientName",
-  delivery_address: "deliveryAddress",
-  address: "deliveryAddress",
-  order_address: "deliveryAddress",
-  "order address": "deliveryAddress",
-  printer_name: "supplierName",
-  printer: "supplierName",
-  supplier_name: "supplierName",
-  supplier: "supplierName",
-};
+// Shared with /api/import. These two routes read the same sheet, and keeping
+// separate copies of the map is how one of them ended up understanding columns
+// the other silently discarded.
+import { HEADER_MAP, normalizeHeader } from "@/lib/import-mapping";
 
 export async function POST(request: NextRequest) {
   // Machine endpoint: authenticated by API key, not by session. Checked before
