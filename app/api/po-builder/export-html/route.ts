@@ -27,6 +27,18 @@ type Supplier = {
   pocPhone?: string | null;
 };
 
+const SIZE_KEYS: (keyof Sizes)[] = ["xs", "s", "m", "l", "xl", "xxl", "xxxl"];
+
+// The quantity the manufacturer is being asked for in one size: the base
+// quantity plus whatever was typed into the builder's extras row.
+function cell(item: LineItem, k: keyof Sizes): number {
+  return (parseInt(item.sizes?.[k]) || 0) + (parseInt(item.extras?.[k]) || 0);
+}
+
+function lineTotal(item: LineItem): number {
+  return SIZE_KEYS.reduce((sum, k) => sum + cell(item, k), 0);
+}
+
 function formatDate(dateStr: string): string {
   if (!dateStr) return "";
   try {
@@ -41,14 +53,12 @@ function formatDate(dateStr: string): string {
 function generateLineItemRows(lineItems: LineItem[]): string {
   return lineItems
     .map((item, i) => {
-      const xs = parseInt(item.sizes.xs) || 0;
-      const s = parseInt(item.sizes.s) || 0;
-      const m = parseInt(item.sizes.m) || 0;
-      const l = parseInt(item.sizes.l) || 0;
-      const xl = parseInt(item.sizes.xl) || 0;
-      const xxl = parseInt(item.sizes.xxl) || 0;
-      const xxxl = parseInt(item.sizes.xxxl) || 0;
-      const total = xs + s + m + l + xl + xxl + xxxl;
+      // Each cell is base + extras. The extras row is a separate input in the
+      // builder but the manufacturer only ever sees one number per size, so the
+      // two have to be summed here — dropping extras understates the PO and
+      // leaves the row totals disagreeing with the footer total below.
+      const [xs, s, m, l, xl, xxl, xxxl] = SIZE_KEYS.map((k) => cell(item, k));
+      const total = lineTotal(item);
 
       const itemName = item.orderName || (item.styleCode || item.fabricSwatchCode || "");
 
@@ -156,19 +166,12 @@ export async function POST(request: NextRequest) {
     // Replace shipping method - match the template format exactly
     html = html.replace(/DDP — Sea Freight/g, shippingMethod || "DDP — Sea Freight");
 
-    // Calculate total units and line item count from line items
-    const totalUnits = lineItems.reduce((sum, item) => {
-      const xs = parseInt(item.sizes.xs) || 0;
-      const s = parseInt(item.sizes.s) || 0;
-      const m = parseInt(item.sizes.m) || 0;
-      const l = parseInt(item.sizes.l) || 0;
-      const xl = parseInt(item.sizes.xl) || 0;
-      const xxl = parseInt(item.sizes.xxl) || 0;
-      const xxxl = parseInt(item.sizes.xxxl) || 0;
-      const itemTotal = xs + s + m + l + xl + xxl + xxxl;
-      const extras = Object.values(item.extras).reduce((e, v) => e + (parseInt(v) || 0), 0);
-      return sum + itemTotal + extras;
-    }, 0);
+    // Calculate total units and line item count from line items. Same helper the
+    // rows use, so the footer always adds up to the column above it.
+    const totalUnits = (lineItems as LineItem[]).reduce(
+      (sum, item) => sum + lineTotal(item),
+      0
+    );
 
     // Replace total units in both locations
     html = html.replace(/390 pcs/g, `${totalUnits} pcs`);

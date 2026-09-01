@@ -110,14 +110,14 @@ export function generatePOPdf(
   // Table rows
   doc.fontSize(7).font("Helvetica");
   lineItems.forEach((item, i) => {
-    const xs = parseInt(item.sizes.xs) || 0;
-    const s = parseInt(item.sizes.s) || 0;
-    const m = parseInt(item.sizes.m) || 0;
-    const l = parseInt(item.sizes.l) || 0;
-    const xl = parseInt(item.sizes.xl) || 0;
-    const xxl = parseInt(item.sizes.xxl) || 0;
-    const xxxl = parseInt(item.sizes.xxxl) || 0;
-    const total = xs + s + m + l + xl + xxl + xxxl;
+    // base + extras, as on the HTML PO — the extras row is part of the quantity
+    // the manufacturer is being asked for, not a separate note.
+    const qty = (k: keyof Sizes) =>
+      (parseInt(item.sizes?.[k]) || 0) + (parseInt(item.extras?.[k]) || 0);
+    const xs = qty("xs");
+    const s = qty("s");
+    const m = qty("m");
+    const total = xs + s + m + qty("l") + qty("xl") + qty("xxl") + qty("xxxl");
 
     const rowY = doc.y;
     doc.text(String(i + 1), colX[0], rowY);

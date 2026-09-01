@@ -263,7 +263,7 @@ export function ProductLibrary() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm font-medium text-gray-900">
-                            {supplier.capacityUnits ? `${supplier.capacityUnits} units` : "—"}
+                            {supplier.capacityUnits ? `${supplier.capacityUnits} orders` : "—"}
                           </div>
                         </td>
                       </tr>

@@ -42,14 +42,11 @@ export async function POST(request: NextRequest) {
 
     // Transform line items to include totals
     const processedItems = lineItems.map((item: LineItem) => {
-      const xs = parseInt(item.sizes.xs) || 0;
-      const s = parseInt(item.sizes.s) || 0;
-      const m = parseInt(item.sizes.m) || 0;
-      const l = parseInt(item.sizes.l) || 0;
-      const xl = parseInt(item.sizes.xl) || 0;
-      const xxl = parseInt(item.sizes.xxl) || 0;
-      const xxxl = parseInt(item.sizes.xxxl) || 0;
-      const total = xs + s + m + l + xl + xxl + xxxl;
+      // base + extras — the extras row counts toward the quantity ordered.
+      const total = (["xs", "s", "m", "l", "xl", "xxl", "xxxl"] as (keyof Sizes)[]).reduce(
+        (sum, k) => sum + (parseInt(item.sizes?.[k]) || 0) + (parseInt(item.extras?.[k]) || 0),
+        0
+      );
 
       return {
         ...item,
