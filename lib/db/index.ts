@@ -22,12 +22,27 @@ import * as schema from "./schema";
  * why it surfaced as an unexplained 500 with an empty body rather than as
  * anything diagnosable from the outside.
  *
- * max: 1 makes the ceiling 200 instances instead of 20 — a 10x margin over the
- * point that actually failed. The cost is that concurrent queries WITHIN one
- * instance serialise on the single connection; app/api/suppliers/route.ts runs
- * three queries under Promise.all and will pay for that. It is an admin route,
- * infrequent, and correctness is unaffected — but if it feels slow, raise this
- * to 2 or 3 rather than removing it, and keep instances × max well under 200.
+ * max: 3 is a measured compromise between two failure modes, not a guess.
+ *
+ * This was first set to 1, which does eliminate EMAXCONN — and replaced it with
+ * something worse. Measured at concurrency 30: six requests returned 504
+ * FUNCTION_INVOCATION_TIMEOUT after 300 SECONDS. The cause is in-function
+ * concurrency: Vercel routes several requests to one warm instance, and with a
+ * single connection they queue behind each other inside postgres-js until the
+ * function's own timeout kills them. A fast 500 is bad; a five-minute hung page
+ * is worse, and it is invisible to a health check that only counts errors.
+ *
+ * So the ceiling is bounded from both sides:
+ *   too high  -> 10 x instances exceeds Supavisor's 200 and requests fail fast
+ *   too low   -> requests queue on too few connections and hang until timeout
+ *
+ * 3 gives each instance room for real in-function concurrency while keeping
+ * roughly 66 instances' worth of headroom under the 200 limit. The region move
+ * helps here too: requests now take ~400ms rather than ~1730ms, so each
+ * connection is held about a quarter as long and far fewer are needed at once.
+ *
+ * If you change this, re-run scripts/loadtest/ramp.ts and check BOTH failure
+ * modes — a run that reports no 500s can still be hiding 300s hangs.
  *
  * idle_timeout returns a connection to the pooler after 20s idle instead of
  * holding it for the life of the instance. Without it a lambda that served one
@@ -42,7 +57,7 @@ export const db: any = process.env.DATABASE_URL
       postgres(process.env.DATABASE_URL, {
         prepare: false,
         ssl: "require",
-        max: 1,
+        max: 3,
         idle_timeout: 20,
       }),
       { schema }
