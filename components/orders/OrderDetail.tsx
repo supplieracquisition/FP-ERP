@@ -47,9 +47,8 @@ type OrderData = {
   styleCode: string | null;
   color: string | null;
   templatePdf: string | null;
-  printerShipDate: string | null;
-  originalPrinterShipDate: string | null;
   supplierShipDate: string | null;
+  originalSupplierShipDate: string | null;
   delayReason: string | null;
   testPrintStatus: string | null;
   testPrintRejections: number;
@@ -322,12 +321,15 @@ export function OrderDetail({ orderItemId, userRole }: {
 
   async function saveShipDate() {
     if (!newShipDate) return;
-    const isMovedLater = order?.printerShipDate && newShipDate > order.printerShipDate.slice(0, 10);
+    const isMovedLater = order?.supplierShipDate && newShipDate > order.supplierShipDate.slice(0, 10);
     if (isAdmin && isMovedLater && !delayReason) { toast.error("Please select a delay reason"); return; }
     setSaving(true);
     const res = await fetch(`/api/orders/${orderItemId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ printerShipDate: new Date(newShipDate).toISOString(), delayReason }),
+      // supplierShipDate, not printerShipDate. This delay flow used to write a
+      // different column from the one the pencil-edit above writes and the page
+      // displays — so recording a delay updated a date nobody could see.
+      body: JSON.stringify({ supplierShipDate: new Date(newShipDate).toISOString(), delayReason }),
     });
     setSaving(false);
     if (res.ok) { toast.success("Ship date updated"); setEditShipDate(false); load(); }
@@ -371,9 +373,9 @@ export function OrderDetail({ orderItemId, userRole }: {
   if (!order) return <div className="text-sm text-red-500 py-12 text-center">Order not found</div>;
 
   const currentColumn = effectiveColumn(order.status, order.productionStage);
-  const shipDateChanged = order.originalPrinterShipDate &&
-    order.printerShipDate &&
-    order.originalPrinterShipDate !== order.printerShipDate;
+  const shipDateChanged = order.originalSupplierShipDate &&
+    order.supplierShipDate &&
+    order.originalSupplierShipDate !== order.supplierShipDate;
 
   const testPrints = images.filter((i) => i.type === "test_print");
   const referenceImages = images.filter((i) => i.type === "reference");

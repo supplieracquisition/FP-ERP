@@ -19,7 +19,6 @@ type SupplierMeta = {
 
 type OrderEntry = {
   orderItemId: string;
-  printerShipDate: string;
   supplierShipDate: string | null;
   status: string;
   productionStage: string | null;

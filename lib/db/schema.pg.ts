@@ -53,6 +53,12 @@ export const orderItems = pgTable(
     styleCode: text("style_code"),
     color: text("color"),
     templatePdf: text("template_pdf"),
+    // DEPRECATED, and retained only as the rollback net for
+    // scripts/sql/002_consolidate_ship_date.sql. Still populated, no longer
+    // written or read by anything. The sheet's column is titled "printer ship
+    // date"; the tool's term for the same date is SUPPLIER ship date, and the
+    // data now lives in supplierShipDate / originalSupplierShipDate below. A
+    // later migration drops both of these. Do not add a new read.
     printerShipDate: text("printer_ship_date"),
     originalPrinterShipDate: text("original_printer_ship_date"),
     delayReason: text("delay_reason"),
@@ -72,7 +78,14 @@ export const orderItems = pgTable(
     requiresTestPrint: boolean("requires_test_print").notNull().default(false),
     trackingNumber: text("tracking_number"),
     inHandsDate: text("in_hands_date"),
+    // The one ship date. Written by the PO Builder (via assign-items), by an
+    // in-tool edit, and by import from the sheet's "printer ship date" column.
+    // Capacity anchors its production window on this.
     supplierShipDate: text("supplier_ship_date"),
+    // The immutable baseline the "this ship date moved" marker compares
+    // supplierShipDate against. Set once on first import and never by a client
+    // — the PATCH allowlist in /api/orders/[id] deliberately omits it.
+    originalSupplierShipDate: text("original_supplier_ship_date"),
     testPrintDate: text("test_print_date"),
     clientName: text("client_name"),
     deliveryAddress: text("delivery_address"),

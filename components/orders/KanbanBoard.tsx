@@ -37,9 +37,8 @@ type OrderItem = {
   printType: string | null;
   decoratingMethods: string | null;
   dueDate: string | null;
-  printerShipDate: string | null;
-  originalPrinterShipDate: string | null;
   supplierShipDate: string | null;
+  originalSupplierShipDate: string | null;
   delayReason: string | null;
   testPrintStatus: string | null;
   shippingMethod: string | null;
@@ -355,9 +354,9 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
     : null;
   const isOverdue = daysOverdue !== null && daysOverdue >= 1;
 
-  const shipDateChanged = item.originalPrinterShipDate &&
+  const shipDateChanged = item.originalSupplierShipDate &&
     item.supplierShipDate &&
-    item.originalPrinterShipDate !== item.supplierShipDate;
+    item.originalSupplierShipDate !== item.supplierShipDate;
 
   const shipsInColor =
     shipsInDays === null ? "text-gray-400"
@@ -443,7 +442,7 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
           <div className="flex items-center gap-1">
             <span className="font-semibold uppercase tracking-wide">Ship Date:</span>{" "}
             {fmt(item.supplierShipDate)}
-            {shipDateChanged && <span title={`Original: ${fmt(item.originalPrinterShipDate)}`} className="text-amber-500 cursor-help">✎</span>}
+            {shipDateChanged && <span title={`Original: ${fmt(item.originalSupplierShipDate)}`} className="text-amber-500 cursor-help">✎</span>}
           </div>
         )}
         <ShippingToggle orderItemId={item.orderItemId} current={item.shippingMethod} onSaved={onRefresh} />
