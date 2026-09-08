@@ -50,11 +50,17 @@ export const HEADER_MAP: Record<string, string> = {
   garment_color: "color",
   template_pdf: "templatePdf",
   pdf: "templatePdf",
-  printer_ship_date: "printerShipDate",
-  ship_date: "printerShipDate",
-  print_ship_date: "printerShipDate",
-  original_printer_ship_date: "originalPrinterShipDate",
-  original_ship_date: "originalPrinterShipDate",
+  // The sheet says "printer ship date"; the tool's term for the same date is
+  // SUPPLIER ship date, and supplier_ship_date is the column everything now
+  // reads — capacity anchors its production window on it. This remap is the
+  // whole reason an imported order shows up in the heatmap at all, so these
+  // five lines are load-bearing despite looking like renames.
+  printer_ship_date: "supplierShipDate",
+  ship_date: "supplierShipDate",
+  print_ship_date: "supplierShipDate",
+  supplier_ship_date: "supplierShipDate",
+  original_printer_ship_date: "originalSupplierShipDate",
+  original_ship_date: "originalSupplierShipDate",
   due_date: "dueDate",
   order_due_date: "dueDate",
   print_type: "printType",

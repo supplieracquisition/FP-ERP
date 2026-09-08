@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { orderItems, csvImports, csvImportErrors, suppliers, users } from "@/lib/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { csvImports, csvImportErrors, suppliers, users } from "@/lib/db/schema";
+import { eq, desc } from "drizzle-orm";
 import Papa from "papaparse";
 import { verifyApiKeyFromRequest } from "@/lib/apiKey";
-// Shared with /api/import. These two routes read the same sheet, and keeping
-// separate copies of the map is how one of them ended up understanding columns
-// the other silently discarded.
-import { HEADER_MAP, normalizeHeader } from "@/lib/import-mapping";
+// Shared with /api/import — the SAME row processor, not a second copy of it.
+// These two routes read the same sheet, and every time one of them has carried
+// its own version of this logic the two have drifted apart silently. See
+// lib/import-rows.ts.
+import { importOrderRows } from "@/lib/import-rows";
 
 export async function POST(request: NextRequest) {
   // Machine endpoint: authenticated by API key, not by session. Checked before
@@ -21,6 +22,11 @@ export async function POST(request: NextRequest) {
   }
 
   let text: string;
+  // Derived here rather than after the block below, because `file` is scoped to
+  // that block. Reading it outside threw a ReferenceError on the form-data path
+  // and 500'd the request; the endpoint only worked at all because n8n posts
+  // raw text/csv, where the old ternary short-circuited before evaluating it.
+  let filename = `n8n-import-${Date.now()}.csv`;
   const contentType = request.headers.get("content-type") || "";
 
   if (contentType.includes("text/csv")) {
@@ -35,6 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
     text = await (file as Blob).text();
+    filename = (file as File).name || filename;
   }
 
   // Get or create default admin user for n8n imports
@@ -66,22 +73,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No rows in CSV" }, { status: 400 });
   }
 
-  const rows = rawRows.map((row) => {
-    const normalized: Record<string, string> = {};
-    for (const [key, val] of Object.entries(row)) {
-      normalized[normalizeHeader(key)] = val;
-    }
-    return normalized;
-  });
-
-  const filename = contentType.includes("text/csv")
-    ? `n8n-import-${Date.now()}.csv`
-    : (file as File)?.name || `import-${Date.now()}.csv`;
-
   await db.insert(csvImports).values({
     filename,
     importedBy: adminUserId,
-    rowCount: rows.length,
+    rowCount: rawRows.length,
     status: "processing",
   });
 
@@ -92,90 +87,36 @@ export async function POST(request: NextRequest) {
     .limit(1);
 
   const importId = importRecord.id;
-  let successCount = 0;
-  let errorCount = 0;
 
-  const allSuppliers = await db.select({ id: suppliers.id, name: suppliers.name }).from(suppliers);
-  const supplierByName = new Map<string, number>(allSuppliers.map((s: any) => [s.name.toLowerCase(), s.id]));
+  const allSuppliers = await db
+    .select({ id: suppliers.id, name: suppliers.name })
+    .from(suppliers);
 
-  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-    const row = rows[rowIdx];
-    const mapped: Record<string, string> = {};
+  // Identical processing to the manual upload, by construction. This route used
+  // to carry its own weaker version: exact lowercase name matching (which the
+  // production sheet defeats with its " MTO" suffix), a bare INSERT that could
+  // never revise a stored row, and unconditional writes that could blank live
+  // data with an absent column.
+  const { successCount, errors, ignoredHeaders } = await importOrderRows(
+    rawRows,
+    allSuppliers as { id: number; name: string }[]
+  );
 
-    for (const [csvKey, val] of Object.entries(row)) {
-      const schemaKey = HEADER_MAP[csvKey];
-      if (schemaKey) mapped[schemaKey] = val;
-    }
-
-    const orderItemId = mapped.orderItemId?.trim();
-    const orderId = mapped.orderId?.trim();
-
-    if (!orderItemId || !orderId) {
-      await db.insert(csvImportErrors).values({
-        importId,
-        rowNumber: rowIdx + 2,
-        rawData: JSON.stringify(row),
-        errorMessage: !orderItemId ? "Missing order_item_id" : "Missing order_id",
-      });
-      errorCount++;
-      continue;
-    }
-
-    try {
-      let supplierId: number | null = null;
-      const supplierName = mapped.supplierName?.trim();
-      if (supplierName) {
-        supplierId = supplierByName.get(supplierName.toLowerCase()) || null;
-      }
-
-      const insertData: Record<string, any> = {
-        orderItemId,
-        orderId,
-        orderName: mapped.orderName || null,
-        orderCreatedAt: mapped.orderCreatedAt || null,
-        styleCode: mapped.styleCode || null,
-        color: mapped.color || null,
-        quantity: mapped.quantity ? parseInt(mapped.quantity, 10) || null : null,
-        printType: mapped.printType || null,
-        dueDate: mapped.dueDate || null,
-        printerShipDate: mapped.printerShipDate || null,
-        originalPrinterShipDate: mapped.originalPrinterShipDate || null,
-        totalValue: mapped.totalValue ? parseFloat(mapped.totalValue) || null : null,
-        supplierId: supplierId,
-        decoratingMethods: mapped.decoratingMethods || null,
-        shippingMethod: mapped.shippingMethod || null,
-        requiresTestPrint: mapped.requiresTestPrint ? mapped.requiresTestPrint.toLowerCase() === "true" : false,
-        trackingNumber: mapped.trackingNumber || null,
-        templatePdf: mapped.templatePdf || null,
-        clientName: mapped.clientName || null,
-        deliveryAddress: mapped.deliveryAddress || null,
-        status: "in_production",
-        productionStage: "sample_production",
-      };
-
-      await db.insert(orderItems).values(insertData);
-      successCount++;
-    } catch (err: any) {
-      await db.insert(csvImportErrors).values({
-        importId,
-        rowNumber: rowIdx + 2,
-        rawData: JSON.stringify(row),
-        errorMessage: err.message || "Unknown error",
-      });
-      errorCount++;
-    }
+  for (const e of errors) {
+    await db.insert(csvImportErrors).values({ importId, ...e });
   }
 
   await db
     .update(csvImports)
-    .set({ status: "completed" })
+    .set({ successCount, errorCount: errors.length, status: "completed" })
     .where(eq(csvImports.id, importId));
 
   return NextResponse.json({
     ok: true,
     importId,
     successCount,
-    errorCount,
-    message: `Imported ${successCount} orders (${errorCount} errors)`,
+    errorCount: errors.length,
+    ignoredHeaders,
+    message: `Imported ${successCount} orders (${errors.length} errors)`,
   });
 }
