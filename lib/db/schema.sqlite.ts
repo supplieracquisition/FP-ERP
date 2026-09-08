@@ -127,7 +127,7 @@ export const orderItems = sqliteTable(
     // toISOString(), never a now() default — the trailing-window comparison is
     // a string comparison and a column holding two formats compares wrong.
     // Same rule, and the same reason, as claimedAt above.
-    assignedAt: text("assigned_at"),
+    assignedDate: text("assigned_date"),
     importedAt: text("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

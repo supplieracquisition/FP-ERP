@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
   // ---------------------------------------------------------------------------
 
   // INTAKE — how much new work was handed over in the trailing 7 days. Counted
-  // by assigned_at, independent of the window being displayed: paging the grid
+  // by assigned_date, independent of the window being displayed: paging the grid
   // forward does not change how much work arrived last week.
   const intakeCounts = await intakeBySupplier();
 

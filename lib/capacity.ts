@@ -159,17 +159,17 @@ export function intakeWindowStart(now: Date = new Date()): string {
 /**
  * INTAKE — orders newly handed to each supplier in the trailing 7 days.
  *
- * Counted by assigned_at, NOT by ship date: this measures how fast work is
+ * Counted by assigned_date, NOT by ship date: this measures how fast work is
  * being pushed at a factory, which is a different question from how much is
  * currently on its floor. An order assigned today that ships in six weeks is
  * intake now and pipeline for the next six weeks.
  *
  * The comparison is a lexicographic string compare, which is correct only
- * because assigned_at is written exclusively as toISOString(). See the column
+ * because assigned_date is written exclusively as toISOString(). See the column
  * comment in schema.pg.ts — a column holding two timestamp formats compares
  * wrong and this window silently stops meaning anything.
  *
- * Rows with a NULL assigned_at are orders assigned before this column existed.
+ * Rows with a NULL assigned_date are orders assigned before this column existed.
  * They score zero, which is the right answer for a trailing-7-day window.
  */
 export async function intakeBySupplier(
@@ -183,7 +183,7 @@ export async function intakeBySupplier(
       n: sql<number>`count(*)`,
     })
     .from(orderItems)
-    .where(and(isNotNull(orderItems.supplierId), gte(orderItems.assignedAt, since)))
+    .where(and(isNotNull(orderItems.supplierId), gte(orderItems.assignedDate, since)))
     .groupBy(orderItems.supplierId);
 
   const out = new Map<number, number>();

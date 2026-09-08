@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
         // never land untimed and silently vanish from intake. Deliberately NOT
         // COALESCEd like claimedAt: this is the assignment moment, and building
         // a PO IS the assignment, so a rebuild legitimately restamps it.
-        assignedAt: poDate ?? now,
+        assignedDate: poDate ?? now,
         ...(shippingMethod && { shippingMethod }),
         ...(testPrintDate && { testPrintDate }),
       })

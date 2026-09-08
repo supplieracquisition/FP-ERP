@@ -64,10 +64,10 @@ export const HEADER_MAP: Record<string, string> = {
   // When a printer was put on the job. Feeds the intake measurement on the
   // capacity view — how much new work a factory took on in the trailing week —
   // which is a different question from when the order ships.
-  printer_assigned_date: "assignedAt",
-  assigned_date: "assignedAt",
-  printer_assignment_date: "assignedAt",
-  date_assigned: "assignedAt",
+  printer_assigned_date: "assignedDate",
+  assigned_date: "assignedDate",
+  printer_assignment_date: "assignedDate",
+  date_assigned: "assignedDate",
   due_date: "dueDate",
   order_due_date: "dueDate",
   print_type: "printType",
@@ -176,7 +176,7 @@ export function toNumber(
 /**
  * A sheet date cell -> a full ISO timestamp, or null.
  *
- * Only used for assigned_at, and it matters there specifically: the intake
+ * Only used for assigned_date, and it matters there specifically: the intake
  * window is a LEXICOGRAPHIC string comparison against an ISO timestamp, so a
  * bare "2026-09-01" sorts before "2026-09-01T00:00:00.000Z" and an order
  * assigned on the first day of the window would be missed. Every other date
@@ -215,7 +215,7 @@ export function toIsoTimestamp(raw: string): string | null {
 
 /** Field name -> cell parser. Fields absent from here are trimmed text. */
 export const PARSE: Record<string, (raw: string) => unknown> = {
-  assignedAt: (raw) => toIsoTimestamp(raw),
+  assignedDate: (raw) => toIsoTimestamp(raw),
   printLocations: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   quantity: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   totalValue: (raw) => toNumber(raw, parseFloat),
