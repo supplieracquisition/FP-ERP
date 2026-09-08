@@ -35,12 +35,12 @@ export async function POST(request: Request) {
     const orders = await db
       .select({
         supplierId: orderItems.supplierId,
-        printerShipDate: orderItems.printerShipDate,
+        supplierShipDate: orderItems.supplierShipDate,
         status: orderItems.status,
       })
       .from(orderItems)
       .where(
-        sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.printerShipDate} IS NOT NULL AND ${orderItems.printerShipDate} >= ${today} AND ${orderItems.printerShipDate} <= ${weekFromNow}`
+        sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.supplierShipDate} IS NOT NULL AND ${orderItems.supplierShipDate} >= ${today} AND ${orderItems.supplierShipDate} <= ${weekFromNow}`
       );
 
     // Calculate average daily load per supplier for next 7 days

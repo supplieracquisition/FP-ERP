@@ -304,6 +304,11 @@ async function phase4({ m, gov }: Ctx) {
         orderItemIds: sets[i].orders.map((o) => o.id),
         supplierId: m.supplierId,
         productionStage: "sample_production",
+        // Required by assign-items: an assignment with no ship date would be
+        // invisible to the capacity heatmap, so the route refuses it. Any valid
+        // date works here — this harness asserts on who won the race, not on
+        // scheduling.
+        supplierShipDate: "2026-12-31T00:00:00.000Z",
       })
   );
 

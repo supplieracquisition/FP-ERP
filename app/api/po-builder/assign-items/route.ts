@@ -49,6 +49,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No production stage provided" }, { status: 400 });
   }
 
+  // Required, not optional — this is the invariant that keeps an assigned order
+  // visible to capacity.
+  //
+  // /api/capacity anchors its production window on supplier_ship_date and drops
+  // rows where it is NULL. An assignment written without one therefore leaves an
+  // order that is genuinely assigned, genuinely in production, and completely
+  // absent from the heatmap — with nothing anywhere reporting a problem. That is
+  // precisely the failure the ship-date consolidation was built to fix, and
+  // leaving this field optional would let it reappear one careless caller at a
+  // time. The PO Builder already refuses to export without it
+  // (POBuilder.handleExportClick), so this closes the server side of a rule the
+  // UI was enforcing alone.
+  if (!supplierShipDate) {
+    return NextResponse.json(
+      { error: "No supplier ship date provided" },
+      { status: 400 }
+    );
+  }
+
   // Deduped, because the count guard below compares against this length and a
   // repeated id would make the expected total unreachable.
   const ids = [...new Set(orderItemIds)];
@@ -103,7 +122,9 @@ export async function POST(request: NextRequest) {
         claimedAt: sql`COALESCE(${orderItems.claimedAt}, ${now})`,
         updatedAt: now,
         ...(inHandsDate && { inHandsDate }),
-        ...(supplierShipDate && { supplierShipDate }),
+        // Unconditional: guaranteed present by the guard above, and capacity
+        // depends on it actually being written.
+        supplierShipDate,
         ...(shippingMethod && { shippingMethod }),
         ...(testPrintDate && { testPrintDate }),
       })

@@ -33,11 +33,19 @@ export async function GET(request: NextRequest) {
     .from(supplierOverrides)
     .where(sql`${supplierOverrides.date} >= ${from} AND ${supplierOverrides.date} <= ${to}`);
 
-  // Get active orders (not completed/delivered) for capacity spreading
+  // Get active orders (not completed/delivered) for capacity spreading.
+  //
+  // Anchored on supplier_ship_date, which is the date the PO Builder actually
+  // collects when a PO is built. This read was on printer_ship_date until the
+  // ship-date consolidation, and that single mismatch is what made the heatmap
+  // look stale: assign-items never writes printer_ship_date, so every order
+  // assigned through the normal flow failed the IS NOT NULL test below and was
+  // dropped from the load counts before any JS ran. The assignment was real,
+  // the supplier simply showed zero.
   const orders = await db
     .select({
       orderItemId: orderItems.orderItemId,
-      printerShipDate: orderItems.printerShipDate,
+      supplierShipDate: orderItems.supplierShipDate,
       status: orderItems.status,
       productionStage: orderItems.productionStage,
       styleCode: orderItems.styleCode,
@@ -48,7 +56,7 @@ export async function GET(request: NextRequest) {
     })
     .from(orderItems)
     .where(
-      sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.printerShipDate} IS NOT NULL`
+      sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.supplierShipDate} IS NOT NULL`
     );
 
   // Build OOO map: supplierId -> date -> reason
@@ -68,12 +76,12 @@ export async function GET(request: NextRequest) {
   const ordersByDate: Record<number, Record<string, typeof orders>> = {};
 
   for (const order of orders) {
-    if (!order.supplierId || !order.printerShipDate) continue;
+    if (!order.supplierId || !order.supplierShipDate) continue;
     const supplier = supplierMap.get(order.supplierId);
     if (!supplier) continue;
 
     const prodTime = supplier.productionTime ?? supplier.turnTime ?? 7;
-    const shipDate = parseISO(order.printerShipDate);
+    const shipDate = parseISO(order.supplierShipDate);
     const startDate = addDays(shipDate, -prodTime);
 
     // Clamp the window to [from, to]
