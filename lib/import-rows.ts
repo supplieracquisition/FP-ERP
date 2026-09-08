@@ -160,6 +160,16 @@ export async function importOrderRows(
           }
           values.supplierId = resolved.supplierId;
           values.productionStage = "sample_production";
+          // Note what is deliberately NOT done here: assigned_at is never
+          // defaulted to now() on this path. It is written only when the file
+          // actually carries a "Printer Assigned Date".
+          //
+          // A file without that column would otherwise stamp every row it
+          // touches with today, and re-importing the standing MTO sheet would
+          // dump the entire back catalogue of already-assigned orders into this
+          // week's intake as one enormous phantom spike. An untimed assignment
+          // reads as "assigned before tracking started" and scores zero, which
+          // is both honest and recoverable; an invented timestamp is neither.
         }
       }
 
@@ -168,6 +178,7 @@ export async function importOrderRows(
           id: orderItems.id,
           supplierShipDate: orderItems.supplierShipDate,
           originalSupplierShipDate: orderItems.originalSupplierShipDate,
+          assignedAt: orderItems.assignedAt,
         })
         .from(orderItems)
         .where(eq(orderItems.orderItemId, orderItemId))
@@ -195,6 +206,12 @@ export async function importOrderRows(
         if (existing.originalSupplierShipDate != null) {
           delete values.originalSupplierShipDate;
         }
+
+        // Same rule for the assignment date, for the same reason. Once a PO has
+        // been built in the tool, assigned_at is the date on that document; the
+        // sheet's "Printer Assigned Date" must not revise it and shift the
+        // order into or out of an intake window after the fact.
+        if (existing.assignedAt != null) delete values.assignedAt;
 
         // Status is preserved; productionStage only moves when this row
         // assigned a supplier above.

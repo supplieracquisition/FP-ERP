@@ -694,6 +694,12 @@ export function POBuilder() {
           supplierShipDate: supplierShipDate ? new Date(supplierShipDate).toISOString() : undefined,
           shippingMethod,
           testPrintDate: finalTestPrintDate,
+          // The PO Date is the day this printer was put on the job, so it is
+          // the assignment date the capacity view's intake measurement counts.
+          // Sent explicitly rather than letting the server stamp "now" — the
+          // builder lets you back-date a PO, and intake should reflect the date
+          // on the document rather than the moment the button was pressed.
+          poDate: poDate ? new Date(poDate).toISOString() : undefined,
         }),
         signal: controller.signal,
       });
