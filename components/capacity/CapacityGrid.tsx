@@ -362,8 +362,12 @@ export function CapacityGrid() {
     const from = addDays(new Date(), windowStart);
     const to   = addDays(new Date(), windowStart + windowDays - 1);
     const params = new URLSearchParams({
-      from: from.toISOString().slice(0, 10),
-      to:   to.toISOString().slice(0, 10),
+      // format() gives the LOCAL calendar date. toISOString() gave the UTC one,
+      // which is a different day once local time is past the UTC rollover — so
+      // an evening user was requesting a window shifted a day ahead of the one
+      // the column headers claimed to show.
+      from: format(from, "yyyy-MM-dd"),
+      to:   format(to, "yyyy-MM-dd"),
     });
     const res = await fetch(`/api/capacity?${params}`);
     const d = await res.json();
@@ -555,7 +559,13 @@ export function CapacityGrid() {
                           : <span className="text-gray-300">—</span>}
                       </td>
                       {dates.map((d) => {
-                        const dateStr = d.toISOString().slice(0, 10);
+                        // Must use the same local calendar date the header
+                        // renders with format(d, "M/d") just below. This was
+                        // toISOString(), i.e. the UTC date — so from the
+                        // evening onward every cell looked up the NEXT day's
+                        // load while displaying today's label, and an order
+                        // shipping the 14th appeared under the 13th.
+                        const dateStr = format(d, "yyyy-MM-dd");
                         const units = supplierLoads[dateStr] ?? 0;
                         const isOoo = dateStr in supplierOoo;
                         const oooReason = supplierOoo[dateStr];

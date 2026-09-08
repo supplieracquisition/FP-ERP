@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { suppliers, orderItems, supplierOverrides } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
-import { addDays, parseISO } from "date-fns";
+import { occupiesCapacity } from "@/lib/capacity";
+import { addDays } from "date-fns";
 
 export async function GET(request: NextRequest) {
   await requireInternal();
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest) {
     .from(supplierOverrides)
     .where(sql`${supplierOverrides.date} >= ${from} AND ${supplierOverrides.date} <= ${to}`);
 
-  // Get active orders (not completed/delivered) for capacity spreading.
+  // Get the orders still occupying capacity, for spreading across the calendar.
+  // What counts as "still occupying" lives in lib/capacity.ts and is shared with
+  // the PO Builder's available-capacity figure — notably, a shipped order has
+  // left the factory and releases its bench.
   //
   // Anchored on supplier_ship_date, which is the date the PO Builder actually
   // collects when a PO is built. This read was on printer_ship_date until the
@@ -55,9 +59,7 @@ export async function GET(request: NextRequest) {
       supplierId: orderItems.supplierId,
     })
     .from(orderItems)
-    .where(
-      sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.supplierShipDate} IS NOT NULL`
-    );
+    .where(occupiesCapacity());
 
   // Build OOO map: supplierId -> date -> reason
   const ooo: Record<number, Record<string, string | null>> = {};
@@ -67,8 +69,29 @@ export async function GET(request: NextRequest) {
   }
 
   const supplierMap = new Map<number, any>(allSuppliers.map((s: any) => [s.id, s]));
-  const fromDate = parseISO(from);
-  const toDate = parseISO(to);
+
+  // A ship date is a CALENDAR date, not an instant, and everything below treats
+  // it that way. Three details make that worth spelling out:
+  //
+  //   1. The column holds two shapes. The PO Builder writes a full ISO
+  //      timestamp ("2026-09-14T00:00:00.000Z"); an import writes whatever the
+  //      sheet had, often a bare "2026-09-14". parseISO() reads the first as UTC
+  //      midnight and the second as LOCAL midnight, so mixing them shifts whole
+  //      rows by a day depending on which path created them. Slicing to 10
+  //      characters and forcing UTC removes the difference.
+  //   2. from/to arrive as plain YYYY-MM-DD. Parsed with parseISO() they became
+  //      LOCAL midnight while ship dates were UTC midnight, so the window clamp
+  //      compared two different kinds of instant.
+  //   3. addDays() does its arithmetic on local components, so a window
+  //      spanning a DST change drifts by an hour — enough to push a key onto the
+  //      adjacent day. UTC has no DST, so stepping by exactly 24h keeps every
+  //      date pinned to UTC midnight.
+  const utcDay = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+  const addUtcDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
+  const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+
+  const fromDate = utcDay(from);
+  const toDate = utcDay(to);
 
   // loads: supplierId -> date -> count
   const loads: Record<number, Record<string, number>> = {};
@@ -81,8 +104,8 @@ export async function GET(request: NextRequest) {
     if (!supplier) continue;
 
     const prodTime = supplier.productionTime ?? supplier.turnTime ?? 7;
-    const shipDate = parseISO(order.supplierShipDate);
-    const startDate = addDays(shipDate, -prodTime);
+    const shipDate = utcDay(order.supplierShipDate);
+    const startDate = addUtcDays(shipDate, -prodTime);
 
     // Clamp the window to [from, to]
     const windowStart = startDate < fromDate ? fromDate : startDate;
@@ -90,7 +113,7 @@ export async function GET(request: NextRequest) {
 
     let current = new Date(windowStart);
     while (current <= windowEnd) {
-      const dateStr = current.toISOString().slice(0, 10);
+      const dateStr = dayKey(current);
 
       if (!loads[order.supplierId]) loads[order.supplierId] = {};
       loads[order.supplierId][dateStr] = (loads[order.supplierId][dateStr] ?? 0) + 1;
@@ -99,7 +122,7 @@ export async function GET(request: NextRequest) {
       if (!ordersByDate[order.supplierId][dateStr]) ordersByDate[order.supplierId][dateStr] = [];
       ordersByDate[order.supplierId][dateStr].push(order);
 
-      current = addDays(current, 1);
+      current = addUtcDays(current, 1);
     }
   }
 

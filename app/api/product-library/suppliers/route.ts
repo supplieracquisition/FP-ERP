@@ -1,9 +1,10 @@
 import { db } from "@/lib/db";
 import { fpeSuppliers, suppliers, orderItems } from "@/lib/db/schema";
-import { inArray, eq, sql } from "drizzle-orm";
+import { inArray, eq, and, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { addDays, parseISO } from "date-fns";
 import { requireInternal } from "@/lib/permissions";
+import { occupiesCapacity } from "@/lib/capacity";
 
 export async function POST(request: Request) {
   // Outside the try: requireInternal signals by throwing, and the catch below
@@ -40,7 +41,13 @@ export async function POST(request: Request) {
       })
       .from(orderItems)
       .where(
-        sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.supplierShipDate} IS NOT NULL AND ${orderItems.supplierShipDate} >= ${today} AND ${orderItems.supplierShipDate} <= ${weekFromNow}`
+        and(
+          // Shared with the capacity heatmap, so the PO Builder's "available
+          // capacity" figure and the heatmap can never disagree about whether a
+          // shipped order still occupies a factory.
+          occupiesCapacity(),
+          sql`${orderItems.supplierShipDate} >= ${today} AND ${orderItems.supplierShipDate} <= ${weekFromNow}`
+        )
       );
 
     // Calculate average daily load per supplier for next 7 days
