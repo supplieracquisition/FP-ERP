@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers, orderItems, supplierOverrides } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
+import { occupiesCapacity } from "@/lib/capacity";
 import { addDays, parseISO } from "date-fns";
 
 export async function GET(request: NextRequest) {
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest) {
     .from(supplierOverrides)
     .where(sql`${supplierOverrides.date} >= ${from} AND ${supplierOverrides.date} <= ${to}`);
 
-  // Get active orders (not completed/delivered) for capacity spreading.
+  // Get the orders still occupying capacity, for spreading across the calendar.
+  // What counts as "still occupying" lives in lib/capacity.ts and is shared with
+  // the PO Builder's available-capacity figure — notably, a shipped order has
+  // left the factory and releases its bench.
   //
   // Anchored on supplier_ship_date, which is the date the PO Builder actually
   // collects when a PO is built. This read was on printer_ship_date until the
@@ -55,9 +59,7 @@ export async function GET(request: NextRequest) {
       supplierId: orderItems.supplierId,
     })
     .from(orderItems)
-    .where(
-      sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered' AND ${orderItems.supplierShipDate} IS NOT NULL`
-    );
+    .where(occupiesCapacity());
 
   // Build OOO map: supplierId -> date -> reason
   const ooo: Record<number, Record<string, string | null>> = {};
