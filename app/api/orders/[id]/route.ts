@@ -22,8 +22,7 @@ export async function GET(
       styleCode: orderItems.styleCode,
       color: orderItems.color,
       templatePdf: orderItems.templatePdf,
-      printerShipDate: orderItems.printerShipDate,
-      originalPrinterShipDate: orderItems.originalPrinterShipDate,
+      originalSupplierShipDate: orderItems.originalSupplierShipDate,
       delayReason: orderItems.delayReason,
       testPrintStatus: orderItems.testPrintStatus,
       testPrintRejections: orderItems.testPrintRejections,
@@ -189,7 +188,11 @@ export async function PATCH(
 
   if (body.trackingNumber !== undefined) updates.trackingNumber = body.trackingNumber;
   if (body.shippingMethod !== undefined) updates.shippingMethod = body.shippingMethod;
-  if (body.printerShipDate !== undefined) updates.printerShipDate = body.printerShipDate;
+  // No printerShipDate here — the tool has one ship date and it is
+  // supplierShipDate, admitted below. originalSupplierShipDate is deliberately
+  // NOT admitted: it is the immutable baseline the "ship date moved" marker
+  // compares against, and a client that could rewrite it could erase the
+  // evidence of its own change.
   if (body.delayReason !== undefined) updates.delayReason = body.delayReason;
   // No supplierId here — refused above. Nomination is still editable: it names
   // the supplier who should MAKE the order and assigns nothing.

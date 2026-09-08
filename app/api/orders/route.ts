@@ -18,9 +18,8 @@ const BASE_SELECT = {
   printType: orderItems.printType,
   decoratingMethods: orderItems.decoratingMethods,
   dueDate: orderItems.dueDate,
-  printerShipDate: orderItems.printerShipDate,
   supplierShipDate: orderItems.supplierShipDate,
-  originalPrinterShipDate: orderItems.originalPrinterShipDate,
+  originalSupplierShipDate: orderItems.originalSupplierShipDate,
   delayReason: orderItems.delayReason,
   totalValue: orderItems.totalValue,
   status: orderItems.status,
@@ -142,12 +141,12 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
   if (shipDate) {
     const today = format(new Date(), "yyyy-MM-dd");
     if (shipDate === "today") {
-      conditions.push(eq(orderItems.printerShipDate, today));
+      conditions.push(eq(orderItems.supplierShipDate, today));
     } else {
       const cutoff = format(addDays(new Date(), Number(shipDate)), "yyyy-MM-dd");
       conditions.push(and(
-        sql`${orderItems.printerShipDate} >= ${today}`,
-        sql`${orderItems.printerShipDate} <= ${cutoff}`
+        sql`${orderItems.supplierShipDate} >= ${today}`,
+        sql`${orderItems.supplierShipDate} <= ${cutoff}`
       )!);
     }
   }
@@ -157,12 +156,12 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
 
 function buildOrderBy(sortBy: string) {
   switch (sortBy) {
-    case "ship_date":     return [asc(orderItems.printerShipDate), asc(orderItems.dueDate)];
+    case "ship_date":     return [asc(orderItems.supplierShipDate), asc(orderItems.dueDate)];
     case "quantity_asc":  return [asc(orderItems.quantity)];
     case "quantity_desc": return [desc(orderItems.quantity)];
     case "value_asc":     return [asc(orderItems.totalValue)];
     case "value_desc":    return [desc(orderItems.totalValue)];
-    default:              return [asc(orderItems.dueDate), asc(orderItems.printerShipDate)];
+    default:              return [asc(orderItems.dueDate), asc(orderItems.supplierShipDate)];
   }
 }
 
