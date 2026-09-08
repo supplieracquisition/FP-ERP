@@ -17,9 +17,8 @@ type OrderItem = {
   printType: string | null;
   decoratingMethods: string | null;
   dueDate: string | null;
-  printerShipDate: string | null;
-  originalPrinterShipDate: string | null;
   supplierShipDate: string | null;
+  originalSupplierShipDate: string | null;
   totalValue: number | null;
   status: string;
   productionStage: string | null;
@@ -276,9 +275,13 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
                 </tr>
               ) : (
                 items.map((item) => {
-                  const shipDateChanged = item.originalPrinterShipDate &&
-                    item.printerShipDate &&
-                    item.originalPrinterShipDate !== item.printerShipDate;
+                  // Compared against the same field the cell below renders. It
+                  // used to read printerShipDate while the cell showed
+                  // supplierShipDate, so the "edited" marker and the date it
+                  // annotated came from two different columns.
+                  const shipDateChanged = item.originalSupplierShipDate &&
+                    item.supplierShipDate &&
+                    item.originalSupplierShipDate !== item.supplierShipDate;
                   const shipsInDays = item.supplierShipDate
                     ? differenceInDays(new Date(item.supplierShipDate), new Date())
                     : null;
@@ -317,7 +320,7 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
                           {fmt(item.supplierShipDate)}
                         </span>
                         {shipDateChanged && (
-                          <span title={`Original: ${fmt(item.originalPrinterShipDate)}`}
+                          <span title={`Original: ${fmt(item.originalSupplierShipDate)}`}
                             className="ml-1 text-amber-500 cursor-help">✎</span>
                         )}
                       </td>
