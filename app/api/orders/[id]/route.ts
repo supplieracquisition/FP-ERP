@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { toIsoTimestamp } from "@/lib/import-mapping";
 import { orderItems, statusHistory, comments, orderImages, suppliers, users } from "@/lib/db/schema";
 import { eq, asc, desc } from "drizzle-orm";
 import { requireAuth, requireInternal, denyOrderAccess } from "@/lib/permissions";
@@ -23,6 +24,7 @@ export async function GET(
       color: orderItems.color,
       templatePdf: orderItems.templatePdf,
       originalSupplierShipDate: orderItems.originalSupplierShipDate,
+      assignedDate: orderItems.assignedDate,
       delayReason: orderItems.delayReason,
       testPrintStatus: orderItems.testPrintStatus,
       testPrintRejections: orderItems.testPrintRejections,
@@ -202,6 +204,35 @@ export async function PATCH(
   if (body.inHandsDate !== undefined) updates.inHandsDate = body.inHandsDate;
   if (body.supplierShipDate !== undefined) updates.supplierShipDate = body.supplierShipDate;
   if (body.testPrintDate !== undefined) updates.testPrintDate = body.testPrintDate;
+
+  // The assignment date, correctable by hand when a PO or an import recorded it
+  // wrongly (or, for older orders, not at all). Internal-only: it is admitted
+  // here and absent from SUPPLIER_EDITABLE above, so a supplier sending it gets
+  // a 403 rather than a silent drop.
+  //
+  // Normalised rather than stored as sent. Capacity's intake window is a
+  // LEXICOGRAPHIC string comparison, so a bare "2026-09-05" sorts before
+  // "2026-09-05T00:00:00.000Z" and an order edited to the first day of the
+  // window would drop out of it. Every writer of this column has to produce the
+  // same shape -- see the column comment in schema.pg.ts.
+  //
+  // An unparseable value is refused, not coerced to null: silently clearing the
+  // date would quietly remove the order from intake, which is exactly the kind
+  // of invisible wrong answer this whole column exists to make fixable.
+  if (body.assignedDate !== undefined) {
+    if (body.assignedDate === null || body.assignedDate === "") {
+      updates.assignedDate = null;
+    } else {
+      const iso = toIsoTimestamp(String(body.assignedDate));
+      if (!iso) {
+        return NextResponse.json(
+          { error: `Could not read "${body.assignedDate}" as a date.` },
+          { status: 400 }
+        );
+      }
+      updates.assignedDate = iso;
+    }
+  }
 
   await db.update(orderItems).set(updates).where(eq(orderItems.orderItemId, orderItemId));
 

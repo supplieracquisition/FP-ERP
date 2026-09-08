@@ -26,7 +26,14 @@ type Supplier = {
   airShippingTimeline: string | null;
   seaShippingTimeline: string | null;
   weights: string | null;
-  capacityUnits?: number;
+  // Pipeline headroom, resolved by the shared supplier resolver. null means
+  // genuinely unknown — an unresolved printer name, or a supplier with no
+  // weekly_capacity / production_time — and must never render as 0, which
+  // would read as "this factory is full".
+  pipelineCount?: number | null;
+  pipelineCeiling?: number | null;
+  availableCapacity?: number | null;
+  capacityUnknownReason?: string | null;
 };
 
 export function ProductLibrary() {
@@ -263,7 +270,22 @@ export function ProductLibrary() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm font-medium text-gray-900">
-                            {supplier.capacityUnits ? `${supplier.capacityUnits} orders` : "—"}
+                            {supplier.availableCapacity != null ? (
+                              <>
+                                {supplier.availableCapacity} free
+                                <span className="text-gray-400 font-normal">
+                                  {" "}
+                                  ({supplier.pipelineCount}/{supplier.pipelineCeiling} in progress)
+                                </span>
+                              </>
+                            ) : (
+                              <span
+                                className="text-gray-400 font-normal"
+                                title={supplier.capacityUnknownReason ?? undefined}
+                              >
+                                not set
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -51,7 +51,7 @@ const NUMERIC_FIELDS = [
   "productionTime",
   "shippingTimeSea",
   "shippingTimeAir",
-  "capacityUnits",
+  "weeklyCapacity",
 ] as const;
 
 /** Blank means "not known yet" (null), not zero. Zero is a real capacity. */

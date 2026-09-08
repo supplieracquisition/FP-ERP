@@ -51,7 +51,7 @@ export async function GET() {
       productionTime: row.productionTime,
       shippingTimeSea: row.shippingTimeSea,
       shippingTimeAir: row.shippingTimeAir,
-      capacityUnits: row.capacityUnits,
+      weeklyCapacity: row.weeklyCapacity,
       turnTime: row.turnTime,
     },
     signInEmail: session.user.email,

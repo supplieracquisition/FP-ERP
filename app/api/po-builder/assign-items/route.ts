@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
     supplierShipDate,
     shippingMethod,
     testPrintDate,
+    poDate,
   } = body as {
     orderItemIds: number[];
     supplierId: number;
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
     supplierShipDate?: string;
     shippingMethod?: string;
     testPrintDate?: string;
+    poDate?: string;
   };
 
   if (!orderItemIds || orderItemIds.length === 0) {
@@ -125,6 +127,16 @@ export async function POST(request: NextRequest) {
         // Unconditional: guaranteed present by the guard above, and capacity
         // depends on it actually being written.
         supplierShipDate,
+        // The day a printer was put on this job -- what the capacity view's
+        // intake measurement counts. Taken from the builder's PO Date rather
+        // than stamped as now(), because the builder allows back-dating a PO
+        // and intake should follow the date on the document.
+        //
+        // Falls back to now only if the client omitted it, so an assignment can
+        // never land untimed and silently vanish from intake. Deliberately NOT
+        // COALESCEd like claimedAt: this is the assignment moment, and building
+        // a PO IS the assignment, so a rebuild legitimately restamps it.
+        assignedDate: poDate ?? now,
         ...(shippingMethod && { shippingMethod }),
         ...(testPrintDate && { testPrintDate }),
       })

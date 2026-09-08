@@ -2,9 +2,15 @@ import { db } from "@/lib/db";
 import { fpeSuppliers, suppliers, orderItems } from "@/lib/db/schema";
 import { inArray, eq, and, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { addDays, parseISO } from "date-fns";
 import { requireInternal } from "@/lib/permissions";
-import { occupiesCapacity } from "@/lib/capacity";
+import {
+  occupiesCapacity,
+  spreadDays,
+  pipelineCeiling,
+  utcDay,
+  addUtcDays,
+} from "@/lib/capacity";
+import { buildSupplierIndex, resolveSupplier } from "@/lib/import-mapping";
 
 export async function POST(request: Request) {
   // Outside the try: requireInternal signals by throwing, and the catch below
@@ -29,74 +35,83 @@ export async function POST(request: Request) {
       .select()
       .from(suppliers);
 
-    // Fetch current orders to calculate load for next 7 days
-    const today = new Date().toISOString().slice(0, 10);
-    const weekFromNow = addDays(new Date(), 7).toISOString().slice(0, 10);
-
+    // How full each factory's floor is RIGHT NOW, on exactly the definition the
+    // capacity heatmap uses. This figure used to be computed here from its own
+    // private rules and disagreed with the heatmap in three separate ways:
+    //
+    //   - it read capacity_units, the retired orders-per-DAY field
+    //   - it compared ceil(7-day count / 7) against that daily number, mixing a
+    //     windowed count with a rate
+    //   - it looked suppliers up by FUZZY NAME, splitting each name on
+    //     whitespace and registering every fragment over three characters,
+    //     last-write-wins. Against the real supplier list "dongguan" was
+    //     claimed by 3 suppliers, "clothing" by 3 and "ltd." by 6 -- so a row
+    //     that missed an exact match was shown a completely different
+    //     factory's capacity.
     const orders = await db
       .select({
         supplierId: orderItems.supplierId,
         supplierShipDate: orderItems.supplierShipDate,
-        status: orderItems.status,
       })
       .from(orderItems)
-      .where(
-        and(
-          // Shared with the capacity heatmap, so the PO Builder's "available
-          // capacity" figure and the heatmap can never disagree about whether a
-          // shipped order still occupies a factory.
-          occupiesCapacity(),
-          sql`${orderItems.supplierShipDate} >= ${today} AND ${orderItems.supplierShipDate} <= ${weekFromNow}`
-        )
-      );
+      .where(occupiesCapacity());
 
-    // Calculate average daily load per supplier for next 7 days
-    const loadMap = new Map<number, number>();
-    orders.forEach((order) => {
-      if (order.supplierId) {
-        loadMap.set(order.supplierId, (loadMap.get(order.supplierId) || 0) + 1);
+    const supplierById = new Map<number, any>(
+      (suppliersData as any[]).map((s) => [s.id, s])
+    );
+
+    // Pipeline depth: orders on the floor today, same window as the heatmap.
+    const today = utcDay(new Date().toISOString());
+    const pipeline = new Map<number, number>();
+    for (const o of orders) {
+      if (!o.supplierId || !o.supplierShipDate) continue;
+      const supplier = supplierById.get(o.supplierId);
+      if (!supplier) continue;
+      const ship = utcDay(o.supplierShipDate);
+      const start = addUtcDays(ship, -spreadDays(supplier));
+      if (today >= start && today <= ship) {
+        pipeline.set(o.supplierId, (pipeline.get(o.supplierId) ?? 0) + 1);
       }
-    });
+    }
 
-    // Create a map of supplier name to available capacity with fuzzy matching
-    const supplierMap = new Map<string, { totalCapacity: number; availableCapacity: number }>();
-    suppliersData.forEach((supplier) => {
-      if (supplier.name) {
-        const totalCapacity = supplier.capacityUnits || 0;
-        const currentLoad = Math.ceil((loadMap.get(supplier.id) || 0) / 7); // Average daily load
-        const availableCapacity = Math.max(0, totalCapacity - currentLoad);
+    // Name -> supplier, using the SAME resolver the importers use. It already
+    // understands the sheet's " MTO" suffix and punctuation drift, and it
+    // refuses to guess between two suppliers that collapse onto one key rather
+    // than silently picking the last one seen.
+    const supplierIndex = buildSupplierIndex(
+      (suppliersData as { id: number; name: string }[]).filter((s) => s.name)
+    );
 
-        // Add exact match
-        supplierMap.set(supplier.name.toLowerCase(), { totalCapacity, availableCapacity });
-
-        // Also add partial matches for common variations
-        const parts = supplier.name.toLowerCase().split(/[\s,]/);
-        parts.forEach((part) => {
-          if (part.length > 3) {
-            supplierMap.set(part, { totalCapacity, availableCapacity });
-          }
-        });
-      }
-    });
-
-    // Merge FPE data with available capacity using fuzzy matching
     const mergedData = fpeData.map((fpe) => {
-      let capacityInfo = supplierMap.get(fpe.supplierName.toLowerCase());
+      const resolved = fpe.supplierName
+        ? resolveSupplier(fpe.supplierName, supplierIndex)
+        : ({ kind: "unmatched", reason: "No printer name" } as const);
 
-      // Try partial matching if exact match failed
-      if (!capacityInfo) {
-        const fpeParts = fpe.supplierName.toLowerCase().split(/[\s,]/);
-        for (const part of fpeParts) {
-          if (part.length > 3 && supplierMap.has(part)) {
-            capacityInfo = supplierMap.get(part);
-            break;
-          }
-        }
+      if (resolved.kind === "unmatched") {
+        // Unknown or ambiguous name. Reported as unknown rather than defaulted
+        // to 0, which would read as "this factory is full".
+        return {
+          ...fpe,
+          pipelineCount: null,
+          pipelineCeiling: null,
+          availableCapacity: null,
+          capacityUnknownReason: resolved.reason,
+        };
       }
+
+      const supplier = supplierById.get(resolved.supplierId);
+      const ceiling = supplier ? pipelineCeiling(supplier) : null;
+      const count = pipeline.get(resolved.supplierId) ?? 0;
 
       return {
         ...fpe,
-        capacityUnits: capacityInfo?.availableCapacity || 0,
+        pipelineCount: count,
+        pipelineCeiling: ceiling,
+        // Null, not 0, when there is no ceiling -- weekly_capacity or
+        // production_time is unset, so remaining headroom is unknowable. Zero
+        // would mean "no room left", which is a different and wrong claim.
+        availableCapacity: ceiling == null ? null : Math.max(0, ceiling - count),
+        capacityUnknownReason: ceiling == null ? "Capacity not set" : null,
       };
     });
 

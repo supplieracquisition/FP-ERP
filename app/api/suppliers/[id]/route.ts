@@ -74,7 +74,9 @@ export async function PATCH(
   if (body.comments !== undefined) updates.comments = body.comments ?? null;
   if (body.active !== undefined) updates.active = Boolean(body.active);
   if (body.turnTime !== undefined) updates.turnTime = body.turnTime;
-  if (body.capacityUnits !== undefined) updates.capacityUnits = body.capacityUnits;
+  // capacityUnits is retired and deliberately no longer accepted — it keeps its
+  // stored data but is not an input. weeklyCapacity replaces it.
+  if (body.weeklyCapacity !== undefined) updates.weeklyCapacity = body.weeklyCapacity;
   if (body.testPrintTat !== undefined) updates.testPrintTat = body.testPrintTat;
   if (body.productionTime !== undefined) updates.productionTime = body.productionTime;
   if (body.shippingTimeAir !== undefined) updates.shippingTimeAir = body.shippingTimeAir;

@@ -61,6 +61,13 @@ export const HEADER_MAP: Record<string, string> = {
   supplier_ship_date: "supplierShipDate",
   original_printer_ship_date: "originalSupplierShipDate",
   original_ship_date: "originalSupplierShipDate",
+  // When a printer was put on the job. Feeds the intake measurement on the
+  // capacity view — how much new work a factory took on in the trailing week —
+  // which is a different question from when the order ships.
+  printer_assigned_date: "assignedDate",
+  assigned_date: "assignedDate",
+  printer_assignment_date: "assignedDate",
+  date_assigned: "assignedDate",
   due_date: "dueDate",
   order_due_date: "dueDate",
   print_type: "printType",
@@ -166,8 +173,49 @@ export function toNumber(
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * A sheet date cell -> a full ISO timestamp, or null.
+ *
+ * Only used for assigned_date, and it matters there specifically: the intake
+ * window is a LEXICOGRAPHIC string comparison against an ISO timestamp, so a
+ * bare "2026-09-01" sorts before "2026-09-01T00:00:00.000Z" and an order
+ * assigned on the first day of the window would be missed. Every other date
+ * column is stored as written and normalised on read (see utcDay in
+ * lib/capacity.ts), but a comparison column has to be one shape going in.
+ *
+ * Accepts what the sheets actually contain: ISO, YYYY-MM-DD, and US M/D/YYYY.
+ * Anything unparseable becomes null rather than a wrong date — an order with no
+ * assignment timestamp reads as "assigned before tracking", which is recoverable
+ * and obvious, while a date silently off by a month is neither.
+ */
+export function toIsoTimestamp(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+
+  // Already a full ISO instant.
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  // Bare calendar date. Pinned to UTC midnight, matching how every other date
+  // in this schema is interpreted.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00:00.000Z`;
+
+  // US M/D/YYYY, which is how these sheets are usually formatted by hand.
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) {
+    const [, m, d, y] = us;
+    const iso = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const parsed = new Date(`${iso}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  return null;
+}
+
 /** Field name -> cell parser. Fields absent from here are trimmed text. */
 export const PARSE: Record<string, (raw: string) => unknown> = {
+  assignedDate: (raw) => toIsoTimestamp(raw),
   printLocations: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   quantity: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   totalValue: (raw) => toNumber(raw, parseFloat),

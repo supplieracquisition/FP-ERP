@@ -3,7 +3,17 @@ import { db } from "@/lib/db";
 import { suppliers, orderItems, supplierOverrides } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
-import { occupiesCapacity } from "@/lib/capacity";
+import {
+  occupiesCapacity,
+  spreadDays,
+  pipelineCeiling,
+  intakeCeiling,
+  intakeBySupplier,
+  ratioStatus,
+  utcDay,
+  addUtcDays,
+  dayKey,
+} from "@/lib/capacity";
 import { addDays } from "date-fns";
 
 export async function GET(request: NextRequest) {
@@ -19,7 +29,7 @@ export async function GET(request: NextRequest) {
       nickname: suppliers.nickname,
       comments: suppliers.comments,
       turnTime: suppliers.turnTime,
-      capacityUnits: suppliers.capacityUnits,
+      weeklyCapacity: suppliers.weeklyCapacity,
       testPrintTat: suppliers.testPrintTat,
       productionTime: suppliers.productionTime,
       shippingTimeAir: suppliers.shippingTimeAir,
@@ -70,26 +80,6 @@ export async function GET(request: NextRequest) {
 
   const supplierMap = new Map<number, any>(allSuppliers.map((s: any) => [s.id, s]));
 
-  // A ship date is a CALENDAR date, not an instant, and everything below treats
-  // it that way. Three details make that worth spelling out:
-  //
-  //   1. The column holds two shapes. The PO Builder writes a full ISO
-  //      timestamp ("2026-09-14T00:00:00.000Z"); an import writes whatever the
-  //      sheet had, often a bare "2026-09-14". parseISO() reads the first as UTC
-  //      midnight and the second as LOCAL midnight, so mixing them shifts whole
-  //      rows by a day depending on which path created them. Slicing to 10
-  //      characters and forcing UTC removes the difference.
-  //   2. from/to arrive as plain YYYY-MM-DD. Parsed with parseISO() they became
-  //      LOCAL midnight while ship dates were UTC midnight, so the window clamp
-  //      compared two different kinds of instant.
-  //   3. addDays() does its arithmetic on local components, so a window
-  //      spanning a DST change drifts by an hour — enough to push a key onto the
-  //      adjacent day. UTC has no DST, so stepping by exactly 24h keeps every
-  //      date pinned to UTC midnight.
-  const utcDay = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-  const addUtcDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
-  const dayKey = (d: Date) => d.toISOString().slice(0, 10);
-
   const fromDate = utcDay(from);
   const toDate = utcDay(to);
 
@@ -103,7 +93,7 @@ export async function GET(request: NextRequest) {
     const supplier = supplierMap.get(order.supplierId);
     if (!supplier) continue;
 
-    const prodTime = supplier.productionTime ?? supplier.turnTime ?? 7;
+    const prodTime = spreadDays(supplier);
     const shipDate = utcDay(order.supplierShipDate);
     const startDate = addUtcDays(shipDate, -prodTime);
 
@@ -126,5 +116,63 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ suppliers: allSuppliers, loads, ordersByDate, ooo, from, to });
+  // ---------------------------------------------------------------------------
+  // The two measurements. Reported separately and never summed — they answer
+  // different questions and a supplier can be healthy on one and not the other.
+  // ---------------------------------------------------------------------------
+
+  // INTAKE — how much new work was handed over in the trailing 7 days. Counted
+  // by assigned_date, independent of the window being displayed: paging the grid
+  // forward does not change how much work arrived last week.
+  const intakeCounts = await intakeBySupplier();
+
+  // PIPELINE — how much is on the floor RIGHT NOW. Computed against today
+  // rather than read out of `loads`, because `loads` only covers [from, to] and
+  // would report zero the moment someone paged away from the current week.
+  const today = utcDay(new Date().toISOString());
+  const pipelineCounts = new Map<number, number>();
+  for (const order of orders) {
+    if (!order.supplierId || !order.supplierShipDate) continue;
+    const supplier = supplierMap.get(order.supplierId);
+    if (!supplier) continue;
+
+    const shipDate = utcDay(order.supplierShipDate);
+    const startDate = addUtcDays(shipDate, -spreadDays(supplier));
+    if (today >= startDate && today <= shipDate) {
+      pipelineCounts.set(order.supplierId, (pipelineCounts.get(order.supplierId) ?? 0) + 1);
+    }
+  }
+
+  const capacity: Record<
+    number,
+    {
+      intake: { count: number; ceiling: number | null; status: string };
+      pipeline: { count: number; ceiling: number | null; status: string };
+    }
+  > = {};
+
+  for (const s of allSuppliers as any[]) {
+    const intakeCount = intakeCounts.get(s.id) ?? 0;
+    const pipelineCount = pipelineCounts.get(s.id) ?? 0;
+    // Both ceilings derive from weekly_capacity; the pipeline one also needs
+    // this supplier's OWN production_time and is null without it, so a factory
+    // with no recorded lead time shows its count with no verdict rather than a
+    // verdict against a number nobody entered.
+    const iCeil = intakeCeiling(s);
+    const pCeil = pipelineCeiling(s);
+    capacity[s.id] = {
+      intake: { count: intakeCount, ceiling: iCeil, status: ratioStatus(intakeCount, iCeil) },
+      pipeline: { count: pipelineCount, ceiling: pCeil, status: ratioStatus(pipelineCount, pCeil) },
+    };
+  }
+
+  return NextResponse.json({
+    suppliers: allSuppliers,
+    loads,
+    ordersByDate,
+    ooo,
+    capacity,
+    from,
+    to,
+  });
 }

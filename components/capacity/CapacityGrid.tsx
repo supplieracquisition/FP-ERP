@@ -10,7 +10,7 @@ type SupplierMeta = {
   nickname: string | null;
   comments: string | null;
   turnTime: number | null;
-  capacityUnits: number | null;
+  weeklyCapacity: number | null;
   testPrintTat: number | null;
   productionTime: number | null;
   shippingTimeAir: number | null;
@@ -28,8 +28,16 @@ type OrderEntry = {
   requiresTestPrint: boolean;
 };
 
+type Indicator = {
+  count: number;
+  ceiling: number | null;
+  status: "green" | "amber" | "red" | "unset";
+};
+
 type CapacityData = {
   suppliers: SupplierMeta[];
+  /** Per supplier id: the two measurements, reported separately, never summed. */
+  capacity: Record<number, { intake: Indicator; pipeline: Indicator }>;
   loads: Record<number, Record<string, number>>;
   ordersByDate: Record<number, Record<string, OrderEntry[]>>;
   ooo: Record<number, Record<string, string | null>>;
@@ -38,15 +46,50 @@ type CapacityData = {
 };
 
 
+/**
+ * A day cell counts the orders on a factory's floor that day — which is exactly
+ * the quantity the PIPELINE ceiling bounds. So the cells are shaded against
+ * that derived ceiling, not against a separately-entered daily number.
+ *
+ * That is the whole point of the change: the retired capacity_units was an
+ * orders-per-day figure someone had to reconcile by hand against
+ * production_time, and when the two disagreed the colours were quietly wrong.
+ */
 function cellStyle(units: number, capacity: number | null, isOoo: boolean, isWeekendDay: boolean): string {
   if (isOoo) return "bg-gray-200 text-gray-400";
   if (isWeekendDay) return "bg-gray-50 text-gray-300";
   if (units === 0) return "bg-white text-gray-300";
+  // No ceiling — weekly capacity or production time unset. Show the count in a
+  // neutral colour rather than implying a verdict.
   if (capacity == null || capacity === 0) return "bg-blue-50 text-blue-800";
   const pct = units / capacity;
   if (pct <= 0.7) return "bg-green-100 text-green-900";
   if (pct <= 1.0) return "bg-amber-100 text-amber-900";
   return "bg-red-100 text-red-900 font-semibold";
+}
+
+/** Shared chip for the two indicators. "unset" is grey — never a false green. */
+function IndicatorChip({ label, ind }: { label: string; ind: Indicator | undefined }) {
+  if (!ind || ind.ceiling == null) {
+    return (
+      <span className="text-gray-300 text-xs" title={`${label}: capacity not set`}>
+        not set
+      </span>
+    );
+  }
+  const tone =
+    ind.status === "green" ? "bg-green-100 text-green-900 border-green-300"
+    : ind.status === "amber" ? "bg-amber-100 text-amber-900 border-amber-300"
+    : "bg-red-100 text-red-900 border-red-300 font-semibold";
+  const pct = Math.round((ind.count / ind.ceiling) * 100);
+  return (
+    <span
+      className={`inline-block px-1.5 py-0.5 rounded border text-xs tabular-nums ${tone}`}
+      title={`${label}: ${ind.count} of ${ind.ceiling} (${pct}%)`}
+    >
+      {ind.count}/{ind.ceiling}
+    </span>
+  );
 }
 
 function CapacityCell({
@@ -181,7 +224,7 @@ function EditCapacityModal({ supplier, onSave, onClose }: {
   const [productionTime, setProdTime]   = useState(String(supplier.productionTime ?? ""));
   const [shippingTimeAir, setShipAir]   = useState(String(supplier.shippingTimeAir ?? ""));
   const [shippingTimeSea, setShipSea]   = useState(String(supplier.shippingTimeSea ?? ""));
-  const [capacity, setCapacity]         = useState(String(supplier.capacityUnits ?? ""));
+  const [capacity, setCapacity]         = useState(String(supplier.weeklyCapacity ?? ""));
   const [saving, setSaving]             = useState(false);
 
   const baseTime = (parseInt(testPrintTat) || 0) + (parseInt(productionTime) || 0);
@@ -197,7 +240,7 @@ function EditCapacityModal({ supplier, onSave, onClose }: {
       productionTime: productionTime ? parseInt(productionTime) : null,
       shippingTimeAir: shippingTimeAir ? parseInt(shippingTimeAir) : null,
       shippingTimeSea: shippingTimeSea ? parseInt(shippingTimeSea) : null,
-      capacityUnits: capacity ? parseInt(capacity) : null,
+      weeklyCapacity: capacity ? parseInt(capacity) : null,
     });
     setSaving(false);
     onClose();
@@ -239,7 +282,16 @@ function EditCapacityModal({ supplier, onSave, onClose }: {
           )}
         </div>
 
-        {field("Capacity (max orders / day)", capacity, setCapacity, "e.g. 30")}
+        {field("Capacity (orders / week)", capacity, setCapacity, "e.g. 20")}
+        {productionTime && capacity && (
+          <p className="text-xs text-gray-500 -mt-2">
+            Pipeline ceiling:{" "}
+            <span className="font-semibold">
+              {Math.round(parseInt(capacity) * (parseInt(productionTime) / 7))} orders
+            </span>{" "}
+            in progress at once — derived from {capacity}/week over {productionTime} production days.
+          </p>
+        )}
 
         <div className="flex gap-2 pt-1">
           <button type="submit" disabled={saving}
@@ -384,7 +436,7 @@ export function CapacityGrid() {
       body: JSON.stringify({
         comments: updates.comments,
         turnTime: updates.turnTime,
-        capacityUnits: updates.capacityUnits,
+        weeklyCapacity: updates.weeklyCapacity,
         testPrintTat: updates.testPrintTat,
         productionTime: updates.productionTime,
         shippingTimeAir: updates.shippingTimeAir,
@@ -438,11 +490,11 @@ export function CapacityGrid() {
     { cls: "bg-green-100 border border-green-300", label: "Underload (< 70%)" },
     { cls: "bg-amber-100 border border-amber-300", label: "Properly Loaded (70–100%)" },
     { cls: "bg-red-100 border border-red-300",    label: "Overload (> 100%)" },
-    { cls: "bg-blue-50 border border-blue-300",   label: "No capacity set" },
+    { cls: "bg-blue-50 border border-blue-300",   label: "Capacity not set" },
     { cls: "bg-gray-200 border border-gray-300",  label: "OOO / Holiday" },
   ];
 
-  const totalCols = 4 + windowDays;
+  const totalCols = 5 + windowDays;
 
   return (
     <div className="space-y-4">
@@ -492,8 +544,13 @@ export function CapacityGrid() {
                 <th className="px-3 py-2 text-center font-medium text-gray-500 min-w-[70px] border-r border-gray-200">
                   Prod. Days
                 </th>
-                <th className="px-3 py-2 text-center font-medium text-gray-500 min-w-[70px] border-r border-gray-200">
-                  Capacity
+                <th className="px-3 py-2 text-center font-medium text-gray-500 min-w-[86px] border-r border-gray-200"
+                    title="Orders newly assigned to this supplier in the last 7 days, against its weekly capacity">
+                  Intake (7d)
+                </th>
+                <th className="px-3 py-2 text-center font-medium text-gray-500 min-w-[86px] border-r border-gray-200"
+                    title="Orders on this supplier's floor right now, against weekly capacity x (production days / 7)">
+                  Pipeline
                 </th>
                 {dates.map((d) => (
                   <th key={d.toISOString()}
@@ -527,6 +584,10 @@ export function CapacityGrid() {
                   const supplierLoads = data.loads[supplier.id] ?? {};
                   const supplierOrders = data.ordersByDate[supplier.id] ?? {};
                   const supplierOoo = data.ooo[supplier.id] ?? {};
+                  const supplierCapacity = data.capacity?.[supplier.id];
+                  // Day cells are concurrent work-in-progress, so they share the
+                  // pipeline ceiling rather than a separate daily number.
+                  const dayCeiling = supplierCapacity?.pipeline.ceiling ?? null;
                   const rowBg = idx % 2 === 0 ? "bg-white" : "bg-gray-50/50";
 
                   // Determine expanded date from expandedKey
@@ -553,10 +614,11 @@ export function CapacityGrid() {
                           ? `${supplier.productionTime ?? supplier.turnTime}d`
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-3 py-2.5 text-gray-500 border-r border-gray-200 min-w-[70px] text-center text-xs">
-                        {supplier.capacityUnits != null
-                          ? supplier.capacityUnits
-                          : <span className="text-gray-300">—</span>}
+                      <td className="px-3 py-2.5 border-r border-gray-200 min-w-[86px] text-center">
+                        <IndicatorChip label="Intake (7d)" ind={supplierCapacity?.intake} />
+                      </td>
+                      <td className="px-3 py-2.5 border-r border-gray-200 min-w-[86px] text-center">
+                        <IndicatorChip label="Pipeline" ind={supplierCapacity?.pipeline} />
                       </td>
                       {dates.map((d) => {
                         // Must use the same local calendar date the header
@@ -574,7 +636,7 @@ export function CapacityGrid() {
                           <CapacityCell
                             key={dateStr}
                             units={units}
-                            capacity={supplier.capacityUnits}
+                            capacity={dayCeiling}
                             dateIso={dateStr}
                             dateLabel={format(d, "MMM d")}
                             isWeekendDay={isWeekend(d)}

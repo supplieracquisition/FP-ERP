@@ -19,7 +19,7 @@ type SupplierForm = {
   productionTime: string;
   shippingTimeSea: string;
   shippingTimeAir: string;
-  capacityUnits: string;
+  weeklyCapacity: string;
   pocUserId: string;
   loginName: string;
   loginEmail: string;
@@ -32,7 +32,7 @@ const BLANK_SUPPLIER_FORM: SupplierForm = {
   productionTime: "",
   shippingTimeSea: "",
   shippingTimeAir: "",
-  capacityUnits: "",
+  weeklyCapacity: "",
   pocUserId: "",
   loginName: "",
   loginEmail: "",
@@ -51,7 +51,7 @@ type Supplier = {
   address: string | null;
   comments: string | null;
   turnTime: number | null;
-  capacityUnits: number | null;
+  weeklyCapacity: number | null;
   testPrintTat: number | null;
   productionTime: number | null;
   shippingTimeAir: number | null;
@@ -295,7 +295,7 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
     else toast.error("Failed to save");
   }
 
-  async function saveCapacityField(field: "turnTime" | "capacityUnits" | "testPrintTat" | "productionTime" | "shippingTimeAir" | "shippingTimeSea", value: number | null) {
+  async function saveCapacityField(field: "turnTime" | "weeklyCapacity" | "testPrintTat" | "productionTime" | "shippingTimeAir" | "shippingTimeSea", value: number | null) {
     const res = await fetch(`/api/suppliers/${supplier.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -501,9 +501,9 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
       {/* Capacity */}
       <div className="flex items-end gap-4 pt-1 border-t border-gray-100">
         <InlineNumber
-          label="Capacity (orders/day)"
-          value={supplier.capacityUnits}
-          onSave={(v) => saveCapacityField("capacityUnits", v)}
+          label="Capacity (orders/week)"
+          value={supplier.weeklyCapacity}
+          onSave={(v) => saveCapacityField("weeklyCapacity", v)}
         />
       </div>
 
@@ -597,7 +597,7 @@ export function SuppliersManager({ userRole }: { userRole: string }) {
         productionTime: form.productionTime,
         shippingTimeSea: form.shippingTimeSea,
         shippingTimeAir: form.shippingTimeAir,
-        capacityUnits: form.capacityUnits,
+        weeklyCapacity: form.weeklyCapacity,
         pocUserId: form.pocUserId,
         loginName: form.loginName,
         loginEmail: form.loginEmail,
@@ -688,8 +688,8 @@ export function SuppliersManager({ userRole }: { userRole: string }) {
                 onChange={(v) => setField("shippingTimeAir", v)}
               />
               <FormNumber
-                label="Order capacity (orders/day)" value={form.capacityUnits}
-                onChange={(v) => setField("capacityUnits", v)}
+                label="Order capacity (orders/week)" value={form.weeklyCapacity}
+                onChange={(v) => setField("weeklyCapacity", v)}
               />
               <div className="flex flex-col gap-0.5">
                 <label className="text-xs text-gray-500 font-medium">POC</label>

@@ -49,6 +49,7 @@ type OrderData = {
   templatePdf: string | null;
   supplierShipDate: string | null;
   originalSupplierShipDate: string | null;
+  assignedDate: string | null;
   delayReason: string | null;
   testPrintStatus: string | null;
   testPrintRejections: number;
@@ -255,7 +256,7 @@ export function OrderDetail({ orderItemId, userRole }: {
   const [editShipDate, setEditShipDate] = useState(false);
   const [newShipDate, setNewShipDate] = useState("");
   const [delayReason, setDelayReason] = useState("");
-  const [editingField, setEditingField] = useState<"supplierShipDate" | "inHandsDate" | "testPrintDate" | null>(null);
+  const [editingField, setEditingField] = useState<"supplierShipDate" | "inHandsDate" | "testPrintDate" | "assignedDate" | null>(null);
   const [editValue, setEditValue] = useState("");
 
   const fmt = (d: string | null) => d ? format(new Date(d), "MMM d, yyyy") : "—";
@@ -295,7 +296,7 @@ export function OrderDetail({ orderItemId, userRole }: {
     else toast.error("Failed to update stage");
   }
 
-  async function saveDateEdit(field: "supplierShipDate" | "inHandsDate" | "testPrintDate") {
+  async function saveDateEdit(field: "supplierShipDate" | "inHandsDate" | "testPrintDate" | "assignedDate") {
     setSaving(true);
     const payload: Record<string, unknown> = {};
     payload[field] = editValue ? new Date(editValue).toISOString() : null;
@@ -313,7 +314,7 @@ export function OrderDetail({ orderItemId, userRole }: {
     else toast.error("Failed to update date");
   }
 
-  function startEditDate(field: "supplierShipDate" | "inHandsDate" | "testPrintDate") {
+  function startEditDate(field: "supplierShipDate" | "inHandsDate" | "testPrintDate" | "assignedDate") {
     setEditingField(field);
     const currentValue = order?.[field];
     setEditValue(currentValue ? currentValue.slice(0, 10) : "");
@@ -474,6 +475,45 @@ export function OrderDetail({ orderItemId, userRole }: {
                     {fmt(order.supplierShipDate)}
                     {isInternalUser && (
                       <button onClick={() => startEditDate("supplierShipDate")}
+                        className="text-xs text-blue-500 hover:text-blue-700">Edit</button>
+                    )}
+                  </dd>
+                )}
+              </div>
+              <div>
+                <dt className="text-gray-500">
+                  Printer Assigned Date
+                  <span
+                    className="ml-1 text-gray-400 cursor-help"
+                    title="The day this printer was put on the job. Drives the Intake measurement on the capacity view — edit it if a PO or an import recorded it wrongly."
+                  >
+                    &#9432;
+                  </span>
+                </dt>
+                {editingField === "assignedDate" ? (
+                  <dd className="mt-2 space-y-2">
+                    <input type="date" value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700 w-full" />
+                    <div className="flex gap-2">
+                      <button onClick={() => saveDateEdit("assignedDate")} disabled={saving}
+                        className="text-xs bg-gray-900 text-white px-3 py-1 rounded hover:bg-gray-700 disabled:opacity-50">Save</button>
+                      <button onClick={() => setEditingField(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                    </div>
+                  </dd>
+                ) : (
+                  <dd className="font-medium text-gray-900 mt-0.5 flex items-center gap-2">
+                    {order.assignedDate ? (
+                      fmt(order.assignedDate)
+                    ) : (
+                      // Not "—": an order assigned before this column existed is
+                      // a different thing from one with no printer, and it is
+                      // the case a POC is most likely to want to correct.
+                      <span className="text-gray-400 font-normal">
+                        {order.supplierId ? "not recorded" : "not assigned"}
+                      </span>
+                    )}
+                    {isInternalUser && (
+                      <button onClick={() => startEditDate("assignedDate")}
                         className="text-xs text-blue-500 hover:text-blue-700">Edit</button>
                     )}
                   </dd>
