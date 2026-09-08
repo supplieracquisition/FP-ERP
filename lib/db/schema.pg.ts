@@ -22,7 +22,17 @@ export const suppliers = pgTable("suppliers", {
   address: text("address"),
   comments: text("comments"),
   turnTime: integer("turn_time"),
+  // DEPRECATED — orders per DAY, kept for its data and no longer read or
+  // written by anything. It had to be reconciled by hand against
+  // production_time, and getting that relationship wrong is what made the
+  // capacity display untrustworthy. weeklyCapacity replaces it; the daily
+  // ceiling is now DERIVED. Same treatment as printerShipDate: left in place,
+  // not an input. Do not add a new read.
   capacityUnits: integer("capacity_units"),
+  // Orders per WEEK — the only capacity figure anyone enters. NULL means "not
+  // set yet", and every capacity indicator degrades to a grey "not set" rather
+  // than inventing a threshold. See lib/capacity.ts.
+  weeklyCapacity: integer("weekly_capacity"),
   testPrintTat: integer("test_print_tat"),
   productionTime: integer("production_time"),
   shippingTimeAir: integer("shipping_time_air"),
@@ -107,6 +117,16 @@ export const orderItems = pgTable(
     // column holding both formats compares wrong and every stale claim reads
     // as fresh. One format in, or the lock silently stops expiring.
     claimedAt: text("claimed_at"),
+    // When a printer was put on this order. Distinct from claimedAt (who picked
+    // the job up — that can precede the PO by days and is cleared on release)
+    // and from importedAt (when the row reached the ERP).
+    //
+    // Written by assign-items from the builder's PO Date, and by an import from
+    // the sheet's "Printer Assigned Date" column. ALWAYS an ISO string from
+    // toISOString(), never a now() default — the trailing-window comparison is
+    // a string comparison and a column holding two formats compares wrong.
+    // Same rule, and the same reason, as claimedAt above.
+    assignedAt: text("assigned_at"),
     importedAt: text("imported_at").notNull().default(sql`now()`),
     updatedAt: text("updated_at").notNull().default(sql`now()`),
   },
