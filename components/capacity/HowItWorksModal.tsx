@@ -256,15 +256,6 @@ export function HowItWorksModal({ onClose }: { onClose: () => void }) {
               <em>not recorded</em> — worth filling in if the order is recent enough to
               matter.
             </p>
-            <div className="rounded bg-blue-50 px-3 py-2.5 space-y-1.5">
-              <p className="text-xs font-semibold text-blue-900">Intake looks thin at first</p>
-              <p className="text-xs text-blue-800 leading-relaxed">
-                Almost no existing orders carry an assignment date, because nothing recorded
-                one until now. Intake counts from the first PO built after launch and fills
-                in from there. Pipeline doesn&apos;t have this problem — it reads ship
-                dates, which orders already have.
-              </p>
-            </div>
           </Section>
 
           <p className="text-xs text-gray-500 leading-relaxed border-t border-gray-200 pt-4">
