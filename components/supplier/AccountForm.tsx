@@ -15,7 +15,7 @@ export interface OperationalValues {
   productionTime: number | null;
   shippingTimeSea: number | null;
   shippingTimeAir: number | null;
-  capacityUnits: number | null;
+  weeklyCapacity: number | null;
   turnTime: number | null;
 }
 
@@ -180,9 +180,9 @@ export default function AccountForm({
             ["Shipping time (air)", days(operational.shippingTimeAir)],
             [
               "Capacity",
-              operational.capacityUnits === null
+              operational.weeklyCapacity === null
                 ? "—"
-                : `${operational.capacityUnits.toLocaleString()} units`,
+                : `${operational.weeklyCapacity.toLocaleString()} orders/week`,
             ],
             ["Turn time", days(operational.turnTime)],
           ].map(([label, value]) => (

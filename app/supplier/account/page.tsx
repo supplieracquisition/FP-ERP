@@ -44,7 +44,7 @@ export default async function SupplierAccountPage() {
     productionTime: row.productionTime,
     shippingTimeSea: row.shippingTimeSea,
     shippingTimeAir: row.shippingTimeAir,
-    capacityUnits: row.capacityUnits,
+    weeklyCapacity: row.weeklyCapacity,
     turnTime: row.turnTime,
   };
 

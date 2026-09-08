@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       productionTime: suppliers.productionTime,
       shippingTimeSea: suppliers.shippingTimeSea,
       shippingTimeAir: suppliers.shippingTimeAir,
-      capacityUnits: suppliers.capacityUnits,
+      weeklyCapacity: suppliers.weeklyCapacity,
       turnTime: suppliers.turnTime,
     })
     .from(suppliers)
@@ -81,7 +81,10 @@ export async function POST(request: NextRequest) {
         { label: "Shipping time (air)", value: days(row.shippingTimeAir) },
         {
           label: "Capacity",
-          value: row.capacityUnits === null ? "" : `${row.capacityUnits} units`,
+          value:
+            row.weeklyCapacity === null
+              ? ""
+              : `${row.weeklyCapacity} orders/week`,
         },
         { label: "Turn time", value: days(row.turnTime) },
       ],
