@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { format, addDays, isToday, isWeekend } from "date-fns";
 import { toast } from "sonner";
+import { HowItWorksModal } from "./HowItWorksModal";
 
 type SupplierMeta = {
   id: number;
@@ -408,6 +409,7 @@ export function CapacityGrid() {
   const [editing, setEditing]       = useState<SupplierMeta | null>(null);
   const [oooModal, setOooModal]     = useState<{ supplierId: number; date: string; reason: string | null } | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null); // "supplierId-date"
+  const [showHelp, setShowHelp]     = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -506,6 +508,11 @@ export function CapacityGrid() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowHelp(true)}
+            className="px-3 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50 font-medium">
+            How does this work?
+          </button>
+          <span className="w-px h-5 bg-gray-200" aria-hidden="true" />
           <button onClick={() => setWindowStart((w) => w - 14)} disabled={!hasPrev}
             className="px-3 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40">
             ← Earlier
@@ -683,6 +690,8 @@ export function CapacityGrid() {
           onClose={() => setEditing(null)}
         />
       )}
+
+      {showHelp && <HowItWorksModal onClose={() => setShowHelp(false)} />}
 
       {oooModal && (
         <OooModal
