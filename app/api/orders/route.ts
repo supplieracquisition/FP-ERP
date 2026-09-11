@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors } from "@/lib/db/schema";
+import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors, notifications, testPrintQueue } from "@/lib/db/schema";
 import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
 import { IN_POOL, claimable, claimCutoff, claimIsActive } from "@/lib/claims";
@@ -214,12 +214,33 @@ export async function DELETE() {
   const denied = await denyNonAdmin(session);
   if (denied) return denied;
 
-  // Delete in dependency order
+  // Delete in dependency order.
+  //
+  // FOUR tables carry a foreign key to order_items.order_item_id --
+  // status_history, comments, order_images and NOTIFICATIONS. The last one was
+  // missing here, and because these run as separate statements rather than one
+  // transaction (db.transaction with an async callback is unsupported on the
+  // better-sqlite3 driver -- it throws "Transaction function cannot return a
+  // promise" and the body never runs), the failure was the worst shape
+  // available: the first five deletes committed, then the orders delete hit the
+  // notifications FK and threw. That destroys the import history, audit trail,
+  // comments and images while leaving every order in place -- the exact
+  // opposite of what the button promises.
+  //
+  // Correct ordering is what makes this safe, not atomicity: once every
+  // referencing row is gone, the final delete cannot fail, so there is no
+  // partial state to roll back.
   await db.delete(csvImportErrors);
   await db.delete(csvImports);
   await db.delete(statusHistory);
   await db.delete(comments);
   await db.delete(orderImages);
+  await db.delete(notifications);
+  // No FK on this one, so it never blocked the delete -- it just left rows
+  // pointing at orders that no longer exist, which would then collide with the
+  // unique order_item_id the next time the same order was re-imported and
+  // uploaded a test print.
+  await db.delete(testPrintQueue);
   await db.delete(orderItems);
   return NextResponse.json({ ok: true });
 }
