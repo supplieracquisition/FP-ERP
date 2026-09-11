@@ -201,12 +201,26 @@ export function toIsoTimestamp(raw: string): string | null {
   // in this schema is interpreted.
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00:00.000Z`;
 
-  // US M/D/YYYY, which is how these sheets are usually formatted by hand.
-  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  // US M/D/YYYY, optionally followed by a time — which is how these exports
+  // actually arrive. The real file carries all three shapes at once:
+  // "09/24/2026", "9/10/2026 6:12" and "10/09/2026 0:00:00", sometimes in the
+  // same column, because the sheet is edited by hand and Sheets reformats on
+  // whim. The time part is optional in the pattern for exactly that reason.
+  //
+  // Read as UTC, not local. These are calendar dates in a spreadsheet with no
+  // timezone attached, and interpreting them locally would shift a date across
+  // midnight for anyone west of UTC — the same class of bug that put an order
+  // shipping the 14th under the 13th on the heatmap.
+  const us = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
   if (us) {
-    const [, m, d, y] = us;
-    const iso = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-    const parsed = new Date(`${iso}T00:00:00.000Z`);
+    const [, m, d, y, hh, mm, ss] = us;
+    const iso =
+      `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}` +
+      `T${(hh ?? "0").padStart(2, "0")}:${mm ?? "00"}:${ss ?? "00"}.000Z`;
+    const parsed = new Date(iso);
+    // Catches impossible dates that still match the pattern, e.g. 13/45/2026.
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
 
@@ -215,7 +229,28 @@ export function toIsoTimestamp(raw: string): string | null {
 
 /** Field name -> cell parser. Fields absent from here are trimmed text. */
 export const PARSE: Record<string, (raw: string) => unknown> = {
+  // EVERY date column is normalised on the way in, not just the ones that are
+  // obviously compared.
+  //
+  // These arrive from the sheet as US "09/24/2026" or "9/10/2026 6:12", and
+  // storing that verbatim breaks things quietly rather than loudly:
+  //
+  //   - capacity reads a ship date as `<first 10 chars>T00:00:00.000Z`, so
+  //     "09/24/2026" becomes "09/24/202T00:00:00.000Z" -> Invalid Date. The
+  //     spread loop then never executes and the order draws NO capacity at
+  //     all, while the import still reports success.
+  //   - the orders list filters and sorts ship dates by string comparison, and
+  //     "09/24/2026" sorts before "2026-01-01" because "0" < "2".
+  //   - intake compares assigned dates lexicographically against an ISO
+  //     timestamp, so any other shape silently falls outside every window.
+  //
+  // One shape in the column, decided here, is the only thing that keeps all
+  // three honest.
+  supplierShipDate: (raw) => toIsoTimestamp(raw),
+  originalSupplierShipDate: (raw) => toIsoTimestamp(raw),
   assignedDate: (raw) => toIsoTimestamp(raw),
+  dueDate: (raw) => toIsoTimestamp(raw),
+  orderCreatedAt: (raw) => toIsoTimestamp(raw),
   printLocations: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   quantity: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   totalValue: (raw) => toNumber(raw, parseFloat),
