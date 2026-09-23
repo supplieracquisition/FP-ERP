@@ -34,7 +34,7 @@ import { db } from "@/lib/db";
 import { orderItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import {
-  HEADER_MAP,
+  mapRow,
   normalizeHeader,
   suppliedFields,
   unmappedHeaders,
@@ -98,11 +98,10 @@ export async function importOrderRows(
     const row = rows[rowIdx];
     const rowNumber = rowIdx + 2;
 
-    const mapped: Record<string, string> = {};
-    for (const [csvKey, val] of Object.entries(row)) {
-      const schemaKey = HEADER_MAP[csvKey];
-      if (schemaKey) mapped[schemaKey] = val;
-    }
+    // Precedence-aware, not a plain walk of the row: a file carrying two
+    // spellings of one field must not have the winner decided by column order.
+    // See mapRow() — this is what keeps "Client Name" ahead of "Client".
+    const mapped = mapRow(row);
 
     const orderItemId = mapped.orderItemId?.trim();
     const orderId = mapped.orderId?.trim();

@@ -31,6 +31,9 @@ export function normalizeHeader(h: string): string {
  * hand and have changed wording more than once. Adding an alias is cheap;
  * missing one costs a whole column of data with no error raised. When in doubt,
  * add the alias.
+ *
+ * ORDER MATTERS between aliases of the same field: the first spelling listed
+ * for a field is the authoritative one and the rest are fallbacks. See mapRow().
  */
 export const HEADER_MAP: Record<string, string> = {
   order_id: "orderId",
@@ -96,7 +99,14 @@ export const HEADER_MAP: Record<string, string> = {
   tracking_number: "trackingNumber",
   tracking: "trackingNumber",
   shipping_method: "shippingMethod",
+  // The receiver's Attn name on the PO. "Client Name" is the authoritative
+  // column and is listed first deliberately: before it existed, this field was
+  // being filled by the looser "Client" spelling, which in the live sheet holds
+  // the ORDER MANAGER — so POs went out addressed to a manager's email instead
+  // of the client. Once the export carries both, mapRow() takes "Client Name"
+  // whichever side of the sheet it sits on.
   client_name: "clientName",
+  clients_name: "clientName",
   client: "clientName",
   delivery_address: "deliveryAddress",
   address: "deliveryAddress",
@@ -107,6 +117,50 @@ export const HEADER_MAP: Record<string, string> = {
   supplier_name: "supplierName",
   supplier: "supplierName",
 };
+
+/** field -> its header spellings, most authoritative first (HEADER_MAP order). */
+const FIELD_ALIASES: [string, string[]][] = (() => {
+  const byField = new Map<string, string[]>();
+  for (const [header, field] of Object.entries(HEADER_MAP)) {
+    const seen = byField.get(field);
+    if (seen) seen.push(header);
+    else byField.set(field, [header]);
+  }
+  return [...byField];
+})();
+
+/**
+ * One normalized CSV row -> the orderItems fields it carries.
+ *
+ * The obvious loop — walk the row, write HEADER_MAP[key] as you go — is wrong
+ * whenever a file carries two spellings of the same field, because the column
+ * sitting further RIGHT silently wins. The field's meaning then depends on
+ * column order in the export, which nobody controls and no error reports.
+ *
+ * That is exactly the collision "Client Name" walks into: it shares a field
+ * with the looser "Client" spelling, and clientName is what the PO prints as
+ * the receiver's Attn name. With the naive loop, adding the real column would
+ * fix the PO or not depending on which column the export happened to emit last.
+ *
+ * So precedence is explicit: the first spelling listed in HEADER_MAP wins, and
+ * a later alias is consulted ONLY when the preferred column is absent from the
+ * file entirely. Deliberately not "absent or blank on this row" — a blank cell
+ * in the authoritative column is a statement that the value is unknown, and
+ * falling through to "Client" there would put an order manager's email back on
+ * a PO for exactly the rows nobody filled in.
+ */
+export function mapRow(row: Record<string, string>): Record<string, string> {
+  const mapped: Record<string, string> = {};
+  for (const [field, aliases] of FIELD_ALIASES) {
+    for (const header of aliases) {
+      if (header in row) {
+        mapped[field] = row[header];
+        break;
+      }
+    }
+  }
+  return mapped;
+}
 
 /**
  * Which orderItems fields a given CSV can actually supply.
@@ -255,6 +309,17 @@ export const PARSE: Record<string, (raw: string) => unknown> = {
   quantity: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   totalValue: (raw) => toNumber(raw, parseFloat),
   requiresTestPrint: (raw) => ["true", "yes", "1"].includes(raw.toLowerCase()),
+  // An Attn name is a person; it is never an email address. This is a belt on
+  // top of mapRow()'s precedence, covering the window before the export carries
+  // "Client Name" at all — and the next time a column's contents change without
+  // its title changing, which is how the manager's email got here in the first
+  // place.
+  //
+  // Refusing the value rather than passing it through means a PO shows a blank
+  // Attn line instead of the order manager's email. Blank is visibly wrong to
+  // whoever is building the PO and gets fixed in the builder; a plausible-looking
+  // filled-in field addressed to the wrong person goes to the factory unnoticed.
+  clientName: (raw) => (/\S+@\S+\.\S+/.test(raw) ? null : raw || null),
 };
 
 /** Sentinel for a normalized key that more than one supplier collapses onto. */
