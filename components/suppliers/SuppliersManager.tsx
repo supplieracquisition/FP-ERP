@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 type SupplierUser = { id: number; name: string; email: string };
 type InternalUser = { id: number; name: string };
@@ -642,12 +643,15 @@ export function SuppliersManager({ userRole }: { userRole: string }) {
           <h1 className="text-xl font-bold text-gray-900">Suppliers</h1>
           <p className="text-sm text-gray-500 mt-0.5">{active.length} active manufacturer{active.length !== 1 ? "s" : ""}</p>
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
-        >
-          + Add supplier
-        </button>
+        <div className="flex items-center gap-2">
+          <HowItWorks topic="suppliers" />
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+          >
+            + Add supplier
+          </button>
+        </div>
       </div>
 
       {adding && (

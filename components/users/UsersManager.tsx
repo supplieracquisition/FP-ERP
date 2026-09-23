@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 type User = {
   id: number;
@@ -248,14 +249,19 @@ export function UsersManager({
           <h1 className="text-xl font-bold text-gray-900">Team</h1>
           <p className="text-sm text-gray-500 mt-0.5">{users.length} internal user{users.length !== 1 ? "s" : ""}</p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => setAdding(true)}
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
-          >
-            + Add user
-          </button>
-        )}
+        {/* The explanation is for everyone who can read the roster; only the
+            action beside it is admin-only. */}
+        <div className="flex items-center gap-2">
+          <HowItWorks topic="team" />
+          {isAdmin && (
+            <button
+              onClick={() => setAdding(true)}
+              className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+            >
+              + Add user
+            </button>
+          )}
+        </div>
       </div>
 
       {isAdmin && adding && (

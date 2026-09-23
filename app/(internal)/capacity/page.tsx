@@ -8,6 +8,8 @@ export default async function CapacityPage() {
       <div className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">Capacity</h1>
       </div>
+      {/* The "How does this work?" button lives in the grid's own toolbar, next
+          to the date navigation it explains. */}
       <CapacityGrid />
     </div>
   );
