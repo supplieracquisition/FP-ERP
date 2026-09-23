@@ -388,6 +388,69 @@ export const pobFabricColors = pgTable(
   ]
 );
 
+/**
+ * The audit trail: one row per change anyone made through the tool.
+ *
+ * NOTHING HERE IS A FOREIGN KEY, and that is the central design decision.
+ *
+ * The most important event this table records is a deletion — an order wiped,
+ * a user removed, a supplier dropped. A foreign key to order_items would make
+ * that impossible to record: ON DELETE CASCADE would erase the evidence along
+ * with the order, and a plain reference would block the delete outright. The
+ * log has to outlive everything it describes, so it references nothing and
+ * every id here is a bare value.
+ *
+ * The same reasoning drives the denormalised names. actor_name and
+ * supplier_name are SNAPSHOTS written at the time of the event, not joins.
+ * They keep working after the person leaves and their row is deleted, they
+ * still say who did it if someone is later renamed, and they make the search
+ * bar a single-table scan instead of a three-way join.
+ *
+ * created_at is TEXT and is ALWAYS written from JS as toISOString(), never a
+ * now() default — the same rule as order_items.claimed_at and assigned_date,
+ * and for the same reason: these are compared and sorted as strings, and
+ * Postgres now() renders "2026-09-22 12:00:00+00" while toISOString() renders
+ * "2026-09-22T12:00:00.000Z". A column holding both formats sorts wrong, which
+ * in a log means entries silently appearing in the wrong order.
+ *
+ * `details` is TEXT holding JSON rather than jsonb: this schema has a SQLite
+ * twin that has to stay column-for-column identical, and nothing queries
+ * inside it — it is read back whole and rendered.
+ */
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: serial("id").primaryKey(),
+    createdAt: text("created_at").notNull(),
+    /** Null for anything the system did on its own — n8n imports, cron. */
+    actorUserId: integer("actor_user_id"),
+    actorName: text("actor_name").notNull(),
+    /** admin | internal | supplier | system */
+    actorRole: text("actor_role").notNull(),
+    /** Dotted and stable, e.g. "order.claim". Filtered on; never shown raw. */
+    action: text("action").notNull(),
+    /** order | supplier | user | import | api_key | capacity */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    /** Denormalised so searching an order id is one indexed lookup. */
+    orderItemId: text("order_item_id"),
+    supplierId: integer("supplier_id"),
+    supplierName: text("supplier_name"),
+    /** The human sentence shown in the table. Also searched. */
+    summary: text("summary").notNull(),
+    /** JSON: { field: { from, to } } and anything else worth keeping. */
+    details: text("details"),
+  },
+  (t) => [
+    // The log is read newest-first and almost always filtered by nothing else,
+    // so this is the index that carries the default view and its pagination.
+    index("idx_activity_log_created_at").on(t.createdAt),
+    index("idx_activity_log_order_item_id").on(t.orderItemId),
+    index("idx_activity_log_actor").on(t.actorUserId),
+    index("idx_activity_log_action").on(t.action),
+  ]
+);
+
 export const pobProductFabricMapping = pgTable(
   "pob_product_fabric_mapping",
   {

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 import { denySupplierWrite } from "@/lib/permissions";
 import { notifyChangeRequested } from "@/lib/supplierNotify";
 
@@ -99,6 +100,15 @@ export async function POST(request: NextRequest) {
       { status: 502 }
     );
   }
+
+  await logActivity(session!, {
+    action: "supplier.change_request",
+    entityType: "supplier",
+    entityId: row.id,
+    supplierId: row.id,
+    supplierName: row.nickname ?? row.name,
+    summary: `Supplier requested a change to their details`,
+  });
 
   return NextResponse.json({ ok: true });
 }

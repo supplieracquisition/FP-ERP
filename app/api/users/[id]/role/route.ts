@@ -4,6 +4,7 @@ import { users } from "@/lib/db/schema";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { denyUnlessAdmin } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 
 /**
  * The two roles this endpoint may set.
@@ -128,6 +129,14 @@ export async function PATCH(
   console.log(
     `[users] role change by=${session!.user.id} target=${targetId} ${user.role} -> ${role}`
   );
+
+  await logActivity(session!, {
+    action: "user.role",
+    entityType: "user",
+    entityId: targetId,
+    summary: `Changed ${user.name}'s role from ${user.role} to ${role}`,
+    details: { from: user.role, to: role },
+  });
 
   return NextResponse.json({ ok: true, role });
 }

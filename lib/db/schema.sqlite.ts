@@ -318,6 +318,36 @@ export const pobFabricColors = sqliteTable("pob_fabric_colors", {
   syncedAt: text("synced_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * The audit trail. The SQLite twin of activity_log in schema.pg.ts — keep the
+ * two column-for-column identical; every reason for the shape is documented
+ * there, including why nothing here is a foreign key.
+ */
+export const activityLog = sqliteTable(
+  "activity_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    createdAt: text("created_at").notNull(),
+    actorUserId: integer("actor_user_id"),
+    actorName: text("actor_name").notNull(),
+    actorRole: text("actor_role").notNull(),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    orderItemId: text("order_item_id"),
+    supplierId: integer("supplier_id"),
+    supplierName: text("supplier_name"),
+    summary: text("summary").notNull(),
+    details: text("details"),
+  },
+  (t) => [
+    index("idx_activity_log_created_at").on(t.createdAt),
+    index("idx_activity_log_order_item_id").on(t.orderItemId),
+    index("idx_activity_log_actor").on(t.actorUserId),
+    index("idx_activity_log_action").on(t.action),
+  ]
+);
+
 export const pobProductFabricMapping = sqliteTable("pob_product_fabric_mapping", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   styleCode: text("style_code").notNull(),

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { apiKeys, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 import { ensureApiKeysTable } from "@/lib/db/ensure-tables";
 import crypto from "crypto";
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  await requireAdmin();
+  const session = await requireAdmin();
   await ensureApiKeysTable();
 
   const { name } = await request.json();
@@ -60,6 +61,15 @@ export async function POST(request: NextRequest) {
       createdBy: admin.id,
     });
 
+    // The key itself is never logged — only that one was made, and by whom.
+    // The audit trail is long-lived and widely read; a credential in it would
+    // outlive every rotation.
+    await logActivity(session, {
+      action: "apikey.create",
+      entityType: "api_key",
+      summary: `Created API key "${name}"`,
+    });
+
     return NextResponse.json({
       message: "API key created (save this, you won't see it again)",
       key: plainKey,
@@ -71,7 +81,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  await requireAdmin();
+  const session = await requireAdmin();
   await ensureApiKeysTable();
 
   const { keyId } = await request.json();
@@ -79,8 +89,22 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "keyId required" }, { status: 400 });
   }
 
+  // Read the name before the delete, so the entry can say which key it was.
+  const [doomed] = await db
+    .select({ name: apiKeys.name })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, keyId))
+    .limit(1);
+  const doomedName = doomed?.name ?? null;
+
   try {
     await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+    await logActivity(session, {
+      action: "apikey.delete",
+      entityType: "api_key",
+      entityId: keyId,
+      summary: `Revoked API key ${doomedName ? `"${doomedName}"` : `#${keyId}`}`,
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: "Failed to delete API key" }, { status: 500 });

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { logActivity, changedFields } from "@/lib/activity";
 import { inviteSupplierUser } from "@/lib/invite";
 
 export async function PATCH(
@@ -56,6 +57,15 @@ export async function PATCH(
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
+    await logActivity(session, {
+      action: "supplier.edit",
+      entityType: "supplier",
+      entityId: supplierId,
+      supplierId,
+      summary: `Created a portal login for supplier ${body.userEmail}`,
+      details: { userEmail: body.userEmail, invited: result.invited },
+    });
+
     return NextResponse.json({ ok: true, invited: result.invited });
   }
 
@@ -87,7 +97,36 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
+  // Read before the write so the entry can say what each field changed FROM.
+  // Done here rather than earlier because everything above can return without
+  // touching the row, and a lookup on every rejected request is waste.
+  const [before] = await db
+    .select()
+    .from(suppliers)
+    .where(eq(suppliers.id, supplierId))
+    .limit(1);
+
   await db.update(suppliers).set(updates).where(eq(suppliers.id, supplierId));
+
+  const diff = before
+    ? changedFields(
+        before as unknown as Record<string, unknown>,
+        updates,
+        Object.keys(updates)
+      )
+    : null;
+
+  if (diff) {
+    await logActivity(session, {
+      action: "supplier.edit",
+      entityType: "supplier",
+      entityId: supplierId,
+      supplierId,
+      supplierName: before?.nickname ?? before?.name ?? null,
+      summary: `Edited supplier ${before?.name ?? supplierId}: ${Object.keys(diff).join(", ")}`,
+      details: diff,
+    });
+  }
 
   return NextResponse.json({ ok: true });
 }

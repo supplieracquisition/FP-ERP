@@ -7,6 +7,7 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
 import { createNotification } from "@/lib/createNotification";
+import { logActivity } from "@/lib/activity";
 import { orderUploadDir, storedPath } from "@/lib/uploads";
 
 export async function POST(
@@ -74,6 +75,17 @@ export async function POST(
     message: `${posterName} reported an issue on order ${orderItemId}`,
     audience: "team",
     sendEmail: true,
+  });
+
+  await logActivity(session, {
+    action: "order.report",
+    entityType: "order",
+    entityId: orderItemId,
+    orderItemId,
+    summary: `Reported an issue on order ${orderItemId}: ${
+      issue.trim().length > 120 ? issue.trim().slice(0, 120) + "\u2026" : issue.trim()
+    }`,
+    details: { requestedShipDate: requestedShipDate ?? null, images: imageFiles.filter((f) => f && f.size > 0).length },
   });
 
   return NextResponse.json({ ok: true });

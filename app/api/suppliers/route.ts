@@ -4,6 +4,8 @@ import { suppliers, users, orderItems } from "@/lib/db/schema";
 import { asc, eq, ne, sql } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
 import { inviteSupplierUser } from "@/lib/invite";
+import { logActivity } from "@/lib/activity";
+import { auth } from "@/lib/auth";
 
 export async function GET() {
   await requireInternal();
@@ -139,6 +141,16 @@ export async function POST(request: NextRequest) {
       ? { ok: true, invited: result.invited }
       : { ok: false, error: result.error };
   }
+
+  await logActivity((await auth())!, {
+    action: "supplier.create",
+    entityType: "supplier",
+    entityId: supplierId,
+    supplierId,
+    supplierName: body.nickname?.trim() || body.name.trim(),
+    summary: `Added supplier ${body.name.trim()}`,
+    details: { loginInvited: invite?.invited ?? false },
+  });
 
   return NextResponse.json({ ok: true, supplierId, invite });
 }

@@ -9,6 +9,7 @@ import { verifyApiKeyFromRequest } from "@/lib/apiKey";
 // its own version of this logic the two have drifted apart silently. See
 // lib/import-rows.ts.
 import { importOrderRows } from "@/lib/import-rows";
+import { logActivity, SYSTEM_ACTOR } from "@/lib/activity";
 
 export async function POST(request: NextRequest) {
   // Machine endpoint: authenticated by API key, not by session. Checked before
@@ -110,6 +111,18 @@ export async function POST(request: NextRequest) {
     .update(csvImports)
     .set({ successCount, errorCount: errors.length, status: "completed" })
     .where(eq(csvImports.id, importId));
+
+  // SYSTEM_ACTOR, not the admin whose row the importer borrows to satisfy
+  // imported_by. n8n authenticates with an API key and no person is present —
+  // attributing it to a real name would put words in someone's mouth in the
+  // one place that is supposed to be the record of who did what.
+  await logActivity(SYSTEM_ACTOR, {
+    action: "import.run",
+    entityType: "import",
+    entityId: importId,
+    summary: `n8n imported ${successCount} order${successCount !== 1 ? "s" : ""} (${errors.length} error${errors.length !== 1 ? "s" : ""})`,
+    details: { source: "n8n", successCount, errorCount: errors.length, ignoredHeaders },
+  });
 
   return NextResponse.json({
     ok: true,

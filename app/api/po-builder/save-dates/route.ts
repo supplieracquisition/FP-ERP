@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { orderItems } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { requireInternal, denyOrderItemIds } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 
 export async function POST(request: NextRequest) {
   const session = await requireInternal();
@@ -25,6 +26,19 @@ export async function POST(request: NextRequest) {
       .update(orderItems)
       .set({ inHandsDate: new Date(inHandsDate).toISOString() })
       .where(inArray(orderItems.orderItemId, orderItemIds));
+
+    // One entry per order, as with assignment: a date change is per-order
+    // information and has to be findable by that order's id.
+    for (const orderItemId of orderItemIds) {
+      await logActivity(session, {
+        action: "order.dates",
+        entityType: "order",
+        entityId: orderItemId,
+        orderItemId,
+        summary: `Set the in-hands date on order ${orderItemId} to ${inHandsDate}`,
+        details: { inHandsDate },
+      });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
