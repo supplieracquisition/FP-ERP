@@ -8,5 +8,10 @@ import { UsersManager } from "@/components/users/UsersManager";
  */
 export default async function UsersPage() {
   const session = await requireInternal();
-  return <UsersManager isAdmin={session.user.role === "admin"} />;
+  return (
+    <UsersManager
+      isAdmin={session.user.role === "admin"}
+      currentUserId={Number(session.user.id)}
+    />
+  );
 }

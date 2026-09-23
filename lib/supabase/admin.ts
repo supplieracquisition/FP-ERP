@@ -9,7 +9,8 @@ let cached: SupabaseClient | null = null;
  * `createClient(url, undefined!)` throws "supabaseKey is required" during
  * import, which would take down every route that transitively imports this
  * file — including ones that never touch admin auth. SUPABASE_SERVICE_ROLE_KEY
- * is still missing from Vercel, so that is the live case, not a hypothetical.
+ * is set in Vercel now, but local dev and the SQLite stub run without it, so
+ * null is still the live case rather than a hypothetical.
  *
  * Callers must handle null and say plainly what is unset. This key bypasses
  * row-level security: server-side only, never NEXT_PUBLIC_.
