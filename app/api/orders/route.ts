@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors, notifications, testPrintQueue } from "@/lib/db/schema";
+import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors, notifications, notificationReads, testPrintQueue } from "@/lib/db/schema";
 import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
 import { IN_POOL, claimable, claimCutoff, claimIsActive } from "@/lib/claims";
@@ -154,14 +154,40 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
   return conditions.length ? and(...conditions) : undefined;
 }
 
+/**
+ * Every branch ends in `id` and that is not decoration — it is what stops
+ * Kanban cards jumping around.
+ *
+ * None of these sort keys is unique. Dozens of orders share a due date, and the
+ * pool is full of rows with no due date at all, so the leading keys leave large
+ * groups of ties. SQL does not order within a tie, so the database is free to
+ * return those rows however the scan happened to reach them — and an UPDATE
+ * changes that. Postgres does not edit a row in place; it writes a new version,
+ * usually at the end of the heap, so the updated row comes back LATER among its
+ * ties than it did before.
+ *
+ * That is exactly what nominating and claiming do: both are UPDATEs on
+ * order_items, both call onRefresh(), and the board replaces its whole list
+ * with the server's order. So the card someone just touched — and any card tied
+ * with it — visibly reshuffled, which reads as the board scrambling itself
+ * every time a colleague claims something.
+ *
+ * A unique final key removes the ties entirely, so the order is total and the
+ * same rows come back in the same sequence no matter what was written since.
+ *
+ * The paginated path below shares this and needs it more, not less: LIMIT/OFFSET
+ * over a non-deterministic sort can show a row on two pages and never on the
+ * one in between.
+ */
 function buildOrderBy(sortBy: string) {
+  const tiebreak = asc(orderItems.id);
   switch (sortBy) {
-    case "ship_date":     return [asc(orderItems.supplierShipDate), asc(orderItems.dueDate)];
-    case "quantity_asc":  return [asc(orderItems.quantity)];
-    case "quantity_desc": return [desc(orderItems.quantity)];
-    case "value_asc":     return [asc(orderItems.totalValue)];
-    case "value_desc":    return [desc(orderItems.totalValue)];
-    default:              return [asc(orderItems.dueDate), asc(orderItems.supplierShipDate)];
+    case "ship_date":     return [asc(orderItems.supplierShipDate), asc(orderItems.dueDate), tiebreak];
+    case "quantity_asc":  return [asc(orderItems.quantity), tiebreak];
+    case "quantity_desc": return [desc(orderItems.quantity), tiebreak];
+    case "value_asc":     return [asc(orderItems.totalValue), tiebreak];
+    case "value_desc":    return [desc(orderItems.totalValue), tiebreak];
+    default:              return [asc(orderItems.dueDate), asc(orderItems.supplierShipDate), tiebreak];
   }
 }
 
@@ -235,6 +261,11 @@ export async function DELETE() {
   await db.delete(statusHistory);
   await db.delete(comments);
   await db.delete(orderImages);
+  // notification_reads references notifications.id, so it has to go first. The
+  // notifications delete below was added without it, which left the same bug one
+  // table further down: as soon as anyone had marked a notification read, this
+  // threw here — after the deletes above had committed.
+  await db.delete(notificationReads);
   await db.delete(notifications);
   // No FK on this one, so it never blocked the delete -- it just left rows
   // pointing at orders that no longer exist, which would then collide with the

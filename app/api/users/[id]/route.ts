@@ -9,6 +9,23 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseAuthEnabled } from "@/lib/auth-mode";
 
 /**
+ * Is this Supabase telling us it has sent too many emails this hour?
+ *
+ * Checked three ways because the signal has moved between Supabase versions:
+ * `code` is the current, stable form, `status` is what older gotrue returned
+ * bare, and the message match catches a wording we haven't seen yet. A false
+ * negative here just means the admin gets the raw error, which is the old
+ * behaviour — so erring toward matching is safe.
+ */
+function isEmailRateLimit(error: { status?: number; code?: string; message?: string }) {
+  return (
+    error.code === "over_email_send_rate_limit" ||
+    error.status === 429 ||
+    /rate limit/i.test(error.message ?? "")
+  );
+}
+
+/**
  * Send a password reset email.
  *
  * This used to accept a password, consume the request body, write nothing, and
@@ -66,11 +83,19 @@ export async function PATCH(
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
+  const redirectTo = `${appUrl.replace(/\/$/, "")}/set-password`;
+
   const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-    redirectTo: `${appUrl.replace(/\/$/, "")}/set-password`,
+    redirectTo,
   });
 
-  if (error) {
+  if (!error) return NextResponse.json({ ok: true, sentTo: user.email });
+
+  // Supabase's built-in email service sends ~2 messages per hour for the whole
+  // project, and supplier invites spend from the same budget. Hitting that is
+  // routine while onboarding several people at once, and it is not a failure of
+  // anything the admin did — so don't answer it with a dead end.
+  if (!isEmailRateLimit(error)) {
     console.error("[users] password reset failed", error);
     return NextResponse.json(
       { error: `Supabase rejected the reset: ${error.message}` },
@@ -78,7 +103,43 @@ export async function PATCH(
     );
   }
 
-  return NextResponse.json({ ok: true, sentTo: user.email });
+  // Mint the same link Supabase would have emailed and hand it back instead.
+  // generateLink sends nothing, so it is unaffected by the email cap.
+  //
+  // This gives the admin a link that sets someone else's password. That is not
+  // a new power: this route already triggers their reset and DELETE below
+  // already revokes their access. denyUnlessAdmin() above is the gate.
+  const supabaseAdmin = getSupabaseAdmin();
+  if (!supabaseAdmin) {
+    return NextResponse.json(
+      {
+        error:
+          "Supabase's email limit is used up (it sends ~2/hour). SUPABASE_SERVICE_ROLE_KEY is unset, so a link can't be generated instead — either wait an hour or set up custom SMTP in Supabase.",
+      },
+      { status: 502 }
+    );
+  }
+
+  const { data, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    type: "recovery",
+    email: user.email,
+    options: { redirectTo },
+  });
+
+  const link = data?.properties?.action_link;
+  if (linkError || !link) {
+    console.error("[users] reset rate-limited and link generation failed", linkError);
+    return NextResponse.json(
+      {
+        error: `Supabase's email limit is used up (it sends ~2/hour) and the fallback link failed: ${
+          linkError?.message ?? "no link returned"
+        }`,
+      },
+      { status: 502 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, rateLimited: true, link, sentTo: user.email });
 }
 
 /**

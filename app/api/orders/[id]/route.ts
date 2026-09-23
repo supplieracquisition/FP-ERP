@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { toIsoTimestamp } from "@/lib/import-mapping";
-import { orderItems, statusHistory, comments, orderImages, suppliers, users } from "@/lib/db/schema";
-import { eq, asc, desc } from "drizzle-orm";
+import { orderItems, statusHistory, comments, orderImages, suppliers, users, notifications, notificationReads, testPrintQueue } from "@/lib/db/schema";
+import { eq, asc, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireInternal, denyOrderAccess } from "@/lib/permissions";
 import { createNotification } from "@/lib/createNotification";
 import { sendTestPrintToChat } from "@/lib/googleChat";
@@ -262,9 +262,36 @@ export async function DELETE(
   const denied = await denyOrderAccess(session, orderItemId);
   if (denied) return denied;
 
+  // Child rows first, in dependency order. This used to delete only history,
+  // comments and images, which left two references standing: notifications
+  // carries a real FK to order_items.order_item_id, and notification_reads one
+  // to notifications.id. Any order that had ever raised a notification — a
+  // comment, a status change, a test print — therefore failed here with a
+  // foreign key violation, after the first three deletes had already committed.
+  // Same five-table list, and the same reasoning, as the bulk delete in
+  // ../bulk-delete/route.ts; change them together.
+  const doomedNotifications = await db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(eq(notifications.orderItemId, orderItemId));
+
+  if (doomedNotifications.length > 0) {
+    await db.delete(notificationReads).where(
+      inArray(
+        notificationReads.notificationId,
+        doomedNotifications.map((n) => n.id)
+      )
+    );
+  }
+
+  await db.delete(notifications).where(eq(notifications.orderItemId, orderItemId));
   await db.delete(statusHistory).where(eq(statusHistory.orderItemId, orderItemId));
   await db.delete(comments).where(eq(comments.orderItemId, orderItemId));
   await db.delete(orderImages).where(eq(orderImages.orderItemId, orderItemId));
+  // No FK, so it never blocked the delete — it just left rows pointing at an
+  // order that no longer exists, which then collide with the unique
+  // order_item_id if that order is re-imported and uploaded a test print.
+  await db.delete(testPrintQueue).where(eq(testPrintQueue.orderItemId, orderItemId));
   await db.delete(orderItems).where(eq(orderItems.orderItemId, orderItemId));
   return NextResponse.json({ ok: true });
 }

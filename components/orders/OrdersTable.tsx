@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import { format, isAfter, differenceInDays } from "date-fns";
 
 type Supplier = { id: number; name: string };
@@ -100,8 +101,16 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
   const [sortBy, setSortBy]             = useState("");
   const [showDelivered, setShowDelivered] = useState(false);
 
+  // Keyed by orderItemId — the same id the delete endpoint takes — so nothing
+  // has to be mapped back through row indexes, which shift under re-sorts.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
   const isAdmin    = userRole === "admin";
   const isSupplier = userRole === "supplier";
+  // Bulk delete is admin-only, matching the endpoint. Rendering the column for
+  // anyone else would offer a selection whose only action is refused.
+  const canSelect  = isAdmin;
   const orderDetailBase = isSupplier ? "/supplier/orders" : "/orders";
 
   const fetchOrders = useCallback(async () => {
@@ -123,6 +132,11 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
     const data = await res.json();
     setItems(data.items ?? []);
     setTotal(data.total ?? 0);
+    // Dropped whenever the visible set changes. Selection survives only as long
+    // as the rows it was made against: carrying it across a filter or page
+    // change would let a Delete act on orders that are no longer on screen,
+    // which is the one thing a destructive bulk action must never do.
+    setSelected(new Set());
     setLoading(false);
   }, [search, columnFilter, supplierFilter, styleFilter, colorFilter, printTypeFilter, decorationFilter, shipDateFilter, sortBy, showDelivered, page]);
 
@@ -155,6 +169,62 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
     `rounded-md border px-3 py-1.5 text-xs focus:outline-none focus:border-gray-700 bg-white transition-colors ${
       active ? "border-gray-800 text-gray-900 font-bold bg-gray-50 placeholder-gray-700" : "border-gray-300 text-gray-500"
     }`;
+
+  const allOnPageSelected = items.length > 0 && items.every((i) => selected.has(i.orderItemId));
+
+  function toggleOne(orderItemId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderItemId)) next.delete(orderItemId);
+      else next.add(orderItemId);
+      return next;
+    });
+  }
+
+  // Selects this page only, never the whole filtered result. "All 1,200 orders"
+  // behind one checkbox is a very different action from the one the admin can
+  // see, and the count in the confirm would be the only thing standing between a
+  // mis-click and the entire table.
+  function toggleAllOnPage() {
+    setSelected(allOnPageSelected ? new Set() : new Set(items.map((i) => i.orderItemId)));
+  }
+
+  async function deleteSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+
+    if (
+      !confirm(
+        `Delete ${ids.length} order${ids.length !== 1 ? "s" : ""}?\n\n` +
+          "Their comments, status history, images and notifications go too. This cannot be undone."
+      )
+    )
+      return;
+
+    setDeleting(true);
+    const res = await fetch("/api/orders/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderItemIds: ids }),
+    });
+    setDeleting(false);
+    const d = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      // `deleted` can be short of `requested` when someone else removed one
+      // first. Say so rather than reporting the number asked for — the
+      // difference is the admin's cue that they were looking at a stale page.
+      toast.success(
+        d.deleted < d.requested
+          ? `Deleted ${d.deleted} of ${d.requested} — the rest were already gone`
+          : `Deleted ${d.deleted} order${d.deleted !== 1 ? "s" : ""}`
+      );
+      setSelected(new Set());
+      fetchOrders();
+    } else {
+      toast.error(d.error ?? "Failed to delete the selected orders");
+    }
+  }
 
   function clearAll() {
     setSearch(""); setColumnFilter(""); setSupplierFilter("");
@@ -247,12 +317,47 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
         </div>
       </div>
 
+      {/* Selection action bar. Only rendered with a selection, so it never
+          occupies space during ordinary browsing. */}
+      {canSelect && selected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
+          <span className="text-sm font-medium text-red-900">
+            {selected.size} order{selected.size !== 1 ? "s" : ""} selected
+          </span>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="text-xs text-red-700 hover:text-red-900 underline"
+          >
+            Clear selection
+          </button>
+          <button
+            onClick={deleteSelected}
+            disabled={deleting}
+            className="ml-auto rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            {deleting ? "Deleting…" : `Delete ${selected.size} selected`}
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
+                {canSelect && (
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all orders on this page"
+                      checked={allOnPageSelected}
+                      onChange={toggleAllOnPage}
+                      disabled={items.length === 0}
+                      className="h-4 w-4 rounded border-gray-300 accent-red-600 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                  </th>
+                )}
                 <th className="px-4 py-3 text-left font-semibold text-gray-700 text-xs uppercase tracking-wide">Order Item</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700 text-xs uppercase tracking-wide">Style / Color</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700 text-xs uppercase tracking-wide">Units</th>
@@ -267,11 +372,11 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isSupplier ? 7 : 9} className="px-4 py-12 text-center text-sm text-gray-400">Loading…</td>
+                  <td colSpan={(isSupplier ? 7 : 9) + (canSelect ? 1 : 0)} className="px-4 py-12 text-center text-sm text-gray-400">Loading…</td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={isSupplier ? 7 : 9} className="px-4 py-12 text-center text-sm text-gray-400">No orders found</td>
+                  <td colSpan={(isSupplier ? 7 : 9) + (canSelect ? 1 : 0)} className="px-4 py-12 text-center text-sm text-gray-400">No orders found</td>
                 </tr>
               ) : (
                 items.map((item) => {
@@ -287,8 +392,26 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
                     : null;
                   const shipUrgent = shipsInDays !== null && shipsInDays <= 3 && shipsInDays >= 0;
 
+                  const isSelected = selected.has(item.orderItemId);
+
                   return (
-                    <tr key={item.orderItemId} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <tr
+                      key={item.orderItemId}
+                      className={`border-b border-gray-100 transition-colors ${
+                        isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-gray-50"
+                      }`}
+                    >
+                      {canSelect && (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select order ${item.orderItemId}`}
+                            checked={isSelected}
+                            onChange={() => toggleOne(item.orderItemId)}
+                            className="h-4 w-4 rounded border-gray-300 accent-red-600 cursor-pointer"
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <Link href={`${orderDetailBase}/${item.orderItemId}`}
                           className="font-mono font-semibold text-gray-900 hover:text-blue-600 transition-colors">
