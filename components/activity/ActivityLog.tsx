@@ -49,6 +49,7 @@ export function ActivityLog() {
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
@@ -58,6 +59,22 @@ export function ActivityLog() {
 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  /**
+   * A failed load must never render as an empty log.
+   *
+   * The first version of this had `if (res.ok)` and no else, so a request that
+   * failed left the list empty and the table said "No activity recorded yet."
+   * — which is what an audit trail with nothing in it says. The two states look
+   * identical and mean opposite things: one is "nobody has done anything", the
+   * other is "this page cannot see what people have done". An audit tool that
+   * quietly reports the second as the first is worse than one that is plainly
+   * broken, because nothing prompts anyone to go and fix it.
+   *
+   * A 500 here is overwhelmingly one thing — activity_log does not exist
+   * because scripts/sql/004_activity_log.sql has not been run against this
+   * database — so the message says so rather than making someone read the
+   * server logs to find out.
+   */
   const fetchEntries = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page) });
@@ -66,14 +83,34 @@ export function ActivityLog() {
     if (from) params.set("from", from);
     if (to) params.set("to", to);
 
-    const res = await fetch(`/api/activity?${params}`);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/activity?${params}`);
+
+      if (!res.ok) {
+        setEntries([]);
+        setTotal(0);
+        setError(
+          res.status === 500
+            ? "The activity_log table is missing from this database. Run scripts/sql/004_activity_log.sql against it — until then nothing is being recorded."
+            : res.status === 403
+              ? "Only admins can read the activity log."
+              : `Could not load the activity log (HTTP ${res.status}).`
+        );
+        return;
+      }
+
       const data = await res.json();
       setEntries(data.items ?? []);
       setTotal(data.total ?? 0);
       setPageSize(data.pageSize ?? 50);
+      setError(null);
+    } catch {
+      setEntries([]);
+      setTotal(0);
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [search, action, from, to, page]);
 
   // Debounced so typing an order id doesn't fire a query per keystroke. Every
@@ -190,12 +227,21 @@ export function ActivityLog() {
         )}
       </div>
 
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span className="font-medium">The log could not be loaded.</span>{" "}
+          {error}
+        </div>
+      )}
+
       <p className="text-xs text-gray-500">
         {loading
           ? "Loading…"
-          : `${total.toLocaleString()} ${total === 1 ? "entry" : "entries"}${
-              activeFilters > 0 ? " matching" : ""
-            }`}
+          : error
+            ? ""
+            : `${total.toLocaleString()} ${total === 1 ? "entry" : "entries"}${
+                activeFilters > 0 ? " matching" : ""
+              }`}
       </p>
 
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
@@ -222,9 +268,14 @@ export function ActivityLog() {
               {!loading && entries.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">
-                    {activeFilters > 0
-                      ? "Nothing matches those filters."
-                      : "No activity recorded yet."}
+                    {/* Never claims the log is empty when the load failed —
+                        that is the confusion this whole error path exists to
+                        prevent. */}
+                    {error
+                      ? "Could not load the log — see above."
+                      : activeFilters > 0
+                        ? "Nothing matches those filters."
+                        : "No activity recorded yet."}
                   </td>
                 </tr>
               )}
