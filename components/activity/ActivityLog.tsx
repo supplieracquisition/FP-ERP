@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ACTION_LABELS, ACTION_GROUPS, actionLabel } from "@/lib/activity-actions";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 interface Entry {
   id: number;
@@ -149,11 +150,14 @@ export function ActivityLog() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Activity log</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Every change made through the tool — by the team and by suppliers.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Activity log</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Every change made through the tool — by the team and by suppliers.
+          </p>
+        </div>
+        <HowItWorks topic="activity" />
       </div>
 
       <div className="flex flex-wrap gap-3 items-end">

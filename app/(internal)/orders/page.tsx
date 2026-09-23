@@ -6,6 +6,7 @@ import { OrdersTable } from "@/components/orders/OrdersTable";
 import { KanbanBoard } from "@/components/orders/KanbanBoard";
 import { Suspense } from "react";
 import ViewToggle from "./ViewToggle";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 export default async function OrdersPage({
   searchParams,
@@ -47,9 +48,12 @@ export default async function OrdersPage({
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Orders</h1>
-        <ViewToggle current={isKanban ? "kanban" : "table"} />
+        <div className="flex items-center gap-2">
+          <HowItWorks topic="orders" />
+          <ViewToggle current={isKanban ? "kanban" : "table"} />
+        </div>
       </div>
       <Suspense>
         {isKanban ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 export default function ApiKeysPage() {
   const [keys, setKeys] = useState<any[]>([]);
@@ -50,9 +51,12 @@ export default function ApiKeysPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">API Keys</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Manage keys for automated integrations (n8n, webhooks, etc.)</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">API Keys</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Manage keys for automated integrations (n8n, webhooks, etc.)</p>
+        </div>
+        <HowItWorks topic="api-keys" />
       </div>
 
       {createdKey && (
