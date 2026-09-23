@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { suppliers } from "@/lib/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 import { denySupplierWrite } from "@/lib/permissions";
 import {
   SUPPLIER_EDITABLE_FIELDS,
@@ -188,6 +189,19 @@ export async function PATCH(request: NextRequest) {
     notified = false;
     console.error("[supplier-profile] saved but notification failed", err);
   }
+
+  // A supplier changing their own record is exactly the kind of change the
+  // team needs to be able to find later — "who changed the ship address, and
+  // when". `changes` already carries before/after per field for the email, so
+  // the log reuses it rather than recomputing.
+  await logActivity(session, {
+    action: "supplier.profile",
+    entityType: "supplier",
+    entityId: supplierId,
+    supplierId,
+    summary: `Supplier updated their own profile: ${changes.map((c) => c.label).join(", ")}`,
+    details: changes,
+  });
 
   return NextResponse.json({ ok: true, changed: changes.length, notified });
 }

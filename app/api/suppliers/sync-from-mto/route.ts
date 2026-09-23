@@ -4,9 +4,10 @@ import { suppliers } from "@/lib/db/schema";
 import { parseMTOSuppliers } from "@/lib/csv/supplierParser";
 import { eq } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 
 export async function POST(request: NextRequest) {
-  await requireInternal();
+  const session = await requireInternal();
 
   try {
     const body = await request.json();
@@ -69,6 +70,15 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`Sync complete: ${created} created, ${updated} updated`);
+
+    // One entry for the sync, not one per supplier — the same reasoning as
+    // imports: a bulk machine-driven pass should not bury a day of human work.
+    await logActivity(session, {
+      action: "supplier.sync",
+      entityType: "supplier",
+      summary: `Synced suppliers from the MTO sheet: ${created} created, ${updated} updated`,
+      details: { total: mtoSuppliers.length, created, updated },
+    });
 
     return NextResponse.json({
       success: true,

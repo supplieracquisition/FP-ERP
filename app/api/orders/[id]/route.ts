@@ -5,6 +5,7 @@ import { orderItems, statusHistory, comments, orderImages, suppliers, users, not
 import { eq, asc, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireInternal, denyOrderAccess } from "@/lib/permissions";
 import { createNotification } from "@/lib/createNotification";
+import { logActivity, changedFields } from "@/lib/activity";
 import { sendTestPrintToChat } from "@/lib/googleChat";
 
 export async function GET(
@@ -236,6 +237,77 @@ export async function PATCH(
 
   await db.update(orderItems).set(updates).where(eq(orderItems.orderItemId, orderItemId));
 
+  /**
+   * Audit. One PATCH can carry several genuinely different events — a drag
+   * that moves a stage, a nomination, a date correction — so they are recorded
+   * separately rather than flattened into one "edited order". An admin looking
+   * for "who nominated this supplier" should find that, not have to open a
+   * generic edit to discover a nomination inside it.
+   *
+   * `current` was read before the update, so it is the true before-state.
+   */
+  if (updates.nominatedSupplierId !== undefined && updates.nominatedSupplierId !== current.nominatedSupplierId) {
+    const nominatedId = updates.nominatedSupplierId as number | null;
+    // supplierId is set to the NOMINATED supplier so this entry is reachable by
+    // searching that supplier's name — which is how someone will look for it.
+    await logActivity(session, {
+      action: "order.nominate",
+      entityType: "order",
+      entityId: orderItemId,
+      orderItemId,
+      supplierId: nominatedId,
+      summary: nominatedId
+        ? `Nominated a supplier for order ${orderItemId}`
+        : `Cleared the nominated supplier on order ${orderItemId}`,
+      details: { from: current.nominatedSupplierId, to: nominatedId },
+    });
+  }
+
+  if (body.column !== undefined && updates.productionStage !== current.productionStage) {
+    await logActivity(session, {
+      action: "order.stage",
+      entityType: "order",
+      entityId: orderItemId,
+      orderItemId,
+      supplierId: current.supplierId,
+      summary: `Moved order ${orderItemId} to ${body.column}`,
+      details: {
+        from: current.productionStage ?? current.status,
+        to: body.column,
+      },
+    });
+  }
+
+  // Everything else, as one entry. changedFields returns null when a PATCH
+  // rewrote a row with the values it already had, which keeps re-saved forms
+  // out of the log entirely.
+  const edited = changedFields(
+    current as unknown as Record<string, unknown>,
+    updates,
+    [
+      "trackingNumber",
+      "shippingMethod",
+      "delayReason",
+      "requiresTestPrint",
+      "testPrintStatus",
+      "inHandsDate",
+      "supplierShipDate",
+      "testPrintDate",
+      "assignedDate",
+    ]
+  );
+  if (edited) {
+    await logActivity(session, {
+      action: "order.edit",
+      entityType: "order",
+      entityId: orderItemId,
+      orderItemId,
+      supplierId: current.supplierId,
+      summary: `Edited order ${orderItemId}: ${Object.keys(edited).join(", ")}`,
+      details: edited,
+    });
+  }
+
   // Notify supplier when status changes by team
   if (body.column !== undefined && session.user.role !== "supplier") {
     await createNotification({
@@ -261,6 +333,23 @@ export async function DELETE(
   // like everything else — being internal is not the same as handling this one.
   const denied = await denyOrderAccess(session, orderItemId);
   if (denied) return denied;
+
+  // Read what is about to be destroyed, for the audit entry written after it
+  // succeeds. This is the one event where the log cannot fall back to joining
+  // against the live table afterwards, because there will be nothing to join
+  // to — which is also why activity_log holds no foreign keys.
+  const [doomed] = await db
+    .select({
+      orderName: orderItems.orderName,
+      orderId: orderItems.orderId,
+      supplierId: orderItems.supplierId,
+      styleCode: orderItems.styleCode,
+      quantity: orderItems.quantity,
+      status: orderItems.status,
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderItemId, orderItemId))
+    .limit(1);
 
   // Child rows first, in dependency order. This used to delete only history,
   // comments and images, which left two references standing: notifications
@@ -293,5 +382,18 @@ export async function DELETE(
   // order_item_id if that order is re-imported and uploaded a test print.
   await db.delete(testPrintQueue).where(eq(testPrintQueue.orderItemId, orderItemId));
   await db.delete(orderItems).where(eq(orderItems.orderItemId, orderItemId));
+
+  await logActivity(session, {
+    action: "order.delete",
+    entityType: "order",
+    entityId: orderItemId,
+    orderItemId,
+    supplierId: doomed?.supplierId ?? null,
+    summary: `Deleted order ${orderItemId}${doomed?.orderName ? ` (${doomed.orderName})` : ""}`,
+    // The whole row as it last stood. A deletion is the one entry where the
+    // details are the only surviving record of what was there.
+    details: doomed ?? null,
+  });
+
   return NextResponse.json({ ok: true });
 }

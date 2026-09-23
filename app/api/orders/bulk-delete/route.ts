@@ -12,6 +12,7 @@ import {
 import { inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { denyUnlessAdmin } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 
 /**
  * How many orders one request may delete.
@@ -137,6 +138,36 @@ export async function POST(request: NextRequest) {
   await db.delete(orderItems).where(inArray(orderItems.orderItemId, targets));
 
   console.log(`[orders] bulk delete by=${session.user.id} count=${targets.length}`);
+
+  /**
+   * One entry for the batch, plus one per order.
+   *
+   * The batch entry is what an admin reads ("deleted 12 orders"); the per-order
+   * entries are what makes a deleted order findable by its id afterwards, which
+   * is the single most likely search anyone runs against this log — "what
+   * happened to 190943A". Those two needs genuinely differ, and a batch of at
+   * most 500 is small enough to afford both.
+   *
+   * This is the opposite of the choice made for imports, where one upload can
+   * touch hundreds of rows routinely rather than exceptionally, and per-order
+   * entries would bury a day of human activity.
+   */
+  await logActivity(session, {
+    action: "order.bulk_delete",
+    entityType: "order",
+    summary: `Deleted ${targets.length} order${targets.length !== 1 ? "s" : ""} in bulk`,
+    details: { orderItemIds: targets, requested: ids.length },
+  });
+
+  for (const orderItemId of targets) {
+    await logActivity(session, {
+      action: "order.delete",
+      entityType: "order",
+      entityId: orderItemId,
+      orderItemId,
+      summary: `Deleted order ${orderItemId} (part of a bulk delete of ${targets.length})`,
+    });
+  }
 
   return NextResponse.json({
     ok: true,

@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { denyUnlessAdmin } from "@/lib/permissions";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseAuthEnabled } from "@/lib/auth-mode";
+import { logActivity } from "@/lib/activity";
 
 /**
  * Is this Supabase telling us it has sent too many emails this hour?
@@ -48,7 +49,7 @@ export async function PATCH(
   const { id } = await params;
 
   const [user] = await db
-    .select({ id: users.id, email: users.email })
+    .select({ id: users.id, email: users.email, name: users.name })
     .from(users)
     .where(eq(users.id, Number(id)))
     .limit(1);
@@ -89,7 +90,15 @@ export async function PATCH(
     redirectTo,
   });
 
-  if (!error) return NextResponse.json({ ok: true, sentTo: user.email });
+  if (!error) {
+    await logActivity((await auth())!, {
+      action: "user.reset",
+      entityType: "user",
+      entityId: user.id,
+      summary: `Sent a password reset to ${user.name} (${user.email})`,
+    });
+    return NextResponse.json({ ok: true, sentTo: user.email });
+  }
 
   // Supabase's built-in email service sends ~2 messages per hour for the whole
   // project, and supplier invites spend from the same budget. Hitting that is
@@ -138,6 +147,18 @@ export async function PATCH(
       { status: 502 }
     );
   }
+
+  // The link itself is deliberately NOT in the log. It sets a password, and an
+  // audit trail is read by more people and kept far longer than a one-off
+  // response body — recording the reset without the credential is the whole
+  // point.
+  await logActivity((await auth())!, {
+    action: "user.reset",
+    entityType: "user",
+    entityId: user.id,
+    summary: `Generated a password reset link for ${user.name} (${user.email}) — Supabase's email limit was spent`,
+    details: { rateLimited: true },
+  });
 
   return NextResponse.json({ ok: true, rateLimited: true, link, sentTo: user.email });
 }
@@ -222,6 +243,18 @@ export async function DELETE(
       authDeleted = false;
     }
   }
+
+  // `user` was read before the delete, so it still names who this was. After
+  // this point the users row is gone and nothing else records that they ever
+  // existed — which is why activity_log keeps name snapshots rather than a
+  // foreign key to users.
+  await logActivity(session, {
+    action: "user.delete",
+    entityType: "user",
+    entityId: targetId,
+    summary: `Removed team member ${user.name} (${user.role})`,
+    details: { name: user.name, role: user.role, authDeleted },
+  });
 
   return NextResponse.json({ ok: true, authDeleted });
 }

@@ -4,6 +4,7 @@ import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports
 import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
 import { IN_POOL, claimable, claimCutoff, claimIsActive } from "@/lib/claims";
+import { logActivity } from "@/lib/activity";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -240,6 +241,12 @@ export async function DELETE() {
   const denied = await denyNonAdmin(session);
   if (denied) return denied;
 
+  // Counted before the wipe, because afterwards there is nothing to count. The
+  // audit entry is the only remaining record that these orders ever existed.
+  const [{ count: doomedCount }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(orderItems);
+
   // Delete in dependency order.
   //
   // FOUR tables carry a foreign key to order_items.order_item_id --
@@ -273,5 +280,17 @@ export async function DELETE() {
   // uploaded a test print.
   await db.delete(testPrintQueue);
   await db.delete(orderItems);
+
+  // Logged last, and deliberately AFTER the deletes rather than before: this
+  // records what happened, not what was attempted. activity_log is untouched by
+  // the wipe above — it holds no foreign key to order_items, so clearing every
+  // order leaves the history of who cleared them intact.
+  await logActivity(session, {
+    action: "order.clear_all",
+    entityType: "order",
+    summary: `Cleared ALL orders (${Number(doomedCount)} deleted), with their history, comments, images and notifications`,
+    details: { deleted: Number(doomedCount) },
+  });
+
   return NextResponse.json({ ok: true });
 }

@@ -4,6 +4,7 @@ import { orderItems, users } from "@/lib/db/schema";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { internalSession, denyOrderAccess } from "@/lib/permissions";
 import { claimCutoff } from "@/lib/claims";
+import { logActivity } from "@/lib/activity";
 
 /**
  * The order-processor claim: the lock that stops two people building a PO for
@@ -63,6 +64,28 @@ export async function POST(
   const me = Number(session.user.id);
   const now = new Date().toISOString();
 
+  /**
+   * Who held it a moment ago — for the audit log ONLY.
+   *
+   * This does NOT reintroduce the check-then-act bug the file warns about. It
+   * decides nothing: the UPDATE below is still the single conditional write
+   * that settles who wins, and its WHERE is evaluated against the row as it is
+   * at that instant, not against this. If this read is stale the worst outcome
+   * is a log entry saying "claimed" where "refreshed" would have been more
+   * precise — never a second winner.
+   *
+   * It exists because re-claiming your own order succeeds by design (an
+   * idempotent refresh, and the PO Builder does it every time an order is
+   * re-added), and recording each of those as a fresh claim would bury the
+   * real ones.
+   */
+  const [before] = await db
+    .select({ processorUserId: orderItems.processorUserId })
+    .from(orderItems)
+    .where(eq(orderItems.orderItemId, orderItemId))
+    .limit(1);
+  const wasAlreadyMine = before?.processorUserId === me;
+
   const won = await db
     .update(orderItems)
     .set({ processorUserId: me, claimedAt: now, updatedAt: now })
@@ -83,6 +106,15 @@ export async function POST(
     .returning({ id: orderItems.id });
 
   if (won.length > 0) {
+    if (!wasAlreadyMine) {
+      await logActivity(session, {
+        action: "order.claim",
+        entityType: "order",
+        entityId: orderItemId,
+        orderItemId,
+        summary: `Claimed order ${orderItemId} to build its PO`,
+      });
+    }
     return NextResponse.json({ ok: true, processorUserId: me, claimedAt: now });
   }
 
@@ -134,6 +166,13 @@ export async function DELETE(
   const isAdmin = session.user.role === "admin";
   const now = new Date().toISOString();
 
+  // Whose claim this is, read BEFORE the release clears it — afterwards there
+  // is nothing left to name. describe() already exists for the failure path;
+  // this is the same lookup moved earlier so the success path can use it too.
+  // It decides nothing: the UPDATE's own WHERE still settles whether the
+  // release is allowed.
+  const held = await describe(orderItemId);
+
   const released = await db
     .update(orderItems)
     .set({ processorUserId: null, claimedAt: null, updatedAt: now })
@@ -148,8 +187,29 @@ export async function DELETE(
     )
     .returning({ id: orderItems.id });
 
-  if (released.length > 0) return NextResponse.json({ ok: true });
+  if (released.length > 0) {
+    // An admin clearing someone else's claim is a different event from a
+    // processor giving up their own, and it is the one worth being able to
+    // find later — so the summary names whose claim it was.
+    const releasedOther = held && held.processorUserId !== me;
+    await logActivity(session, {
+      action: "order.release",
+      entityType: "order",
+      entityId: orderItemId,
+      orderItemId,
+      summary: releasedOther
+        ? `Released ${held?.processorName ?? "another user"}'s claim on order ${orderItemId} (admin)`
+        : `Released their claim on order ${orderItemId}`,
+      details: releasedOther
+        ? { releasedProcessorUserId: held?.processorUserId }
+        : undefined,
+    });
+    return NextResponse.json({ ok: true });
+  }
 
+  // Re-read rather than reusing `held`: the release failed, and the most
+  // likely reason is that the row changed between the two — so the explanation
+  // has to come from the row as it is now, not as it was before the attempt.
   const row = await describe(orderItemId);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 

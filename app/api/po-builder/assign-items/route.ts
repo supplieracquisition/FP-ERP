@@ -4,6 +4,7 @@ import { orderItems, statusHistory, suppliers } from "@/lib/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { internalSession, denyOrderRowIds } from "@/lib/permissions";
 import { claimCutoff, heldBy, allClaimable } from "@/lib/claims";
+import { logActivity } from "@/lib/activity";
 
 /**
  * Building the PO: the event that completes a claim and takes an order out of
@@ -207,6 +208,23 @@ export async function POST(request: NextRequest) {
           .join(", ")}:`,
         historyErr
       );
+    }
+
+    // One audit entry per order rather than one for the PO. A PO covers a
+    // handful of line items, not hundreds, and "which supplier did this order
+    // go to, and who sent it there" is the question this log exists to answer —
+    // it has to be findable by each order's own id.
+    for (const row of assigned as { orderItemId: string }[]) {
+      await logActivity(session, {
+        action: "order.assign",
+        entityType: "order",
+        entityId: row.orderItemId,
+        orderItemId: row.orderItemId,
+        supplierId,
+        supplierName: supplier.name,
+        summary: `Built the PO for order ${row.orderItemId} — assigned to ${supplier.name}`,
+        details: { productionStage, poOrderCount: assigned.length },
+      });
     }
 
     return NextResponse.json({ ok: true, assigned: assigned.length });

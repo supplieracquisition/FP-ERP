@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { orderImages, orderItems, suppliers, users, testPrintQueue } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, denyOrderAccess } from "@/lib/permissions";
+import { logActivity } from "@/lib/activity";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import heicConvert from "heic-convert";
@@ -111,6 +112,15 @@ export async function POST(
       });
     }
   }
+
+  await logActivity(session, {
+    action: "order.image",
+    entityType: "order",
+    entityId: orderItemId,
+    orderItemId,
+    summary: `Uploaded an image to order ${orderItemId}`,
+    details: { imageId: inserted.id },
+  });
 
   return NextResponse.json({ ok: true, url: imageUrl(orderItemId, inserted.id) });
 }

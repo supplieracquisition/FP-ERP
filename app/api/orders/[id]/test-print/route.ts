@@ -7,6 +7,7 @@ import { unlink } from "fs/promises";
 import { absoluteFromStored } from "@/lib/uploads";
 import { createNotification } from "@/lib/createNotification";
 import { sendMail } from "@/lib/email";
+import { logActivity } from "@/lib/activity";
 
 function ordinal(n: number) {
   const s = ["th", "st", "nd", "rd"];
@@ -124,6 +125,16 @@ export async function POST(
       });
     }
   }
+
+  await logActivity(session, {
+    action: "order.test_print",
+    entityType: "order",
+    entityId: orderItemId,
+    orderItemId,
+    supplierId: order.supplierId,
+    summary: `${label} on order ${orderItemId}`,
+    details: { label },
+  });
 
   return NextResponse.json({ ok: true, label });
 }

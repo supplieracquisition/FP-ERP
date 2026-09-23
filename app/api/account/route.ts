@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 import { denyAccountWrite } from "@/lib/permissions";
 import { verifiedSignInEmail } from "@/lib/account";
 
@@ -135,5 +136,13 @@ export async function PATCH(request: NextRequest) {
   // once at invite time and nothing reads it afterwards — auth() builds the
   // session's name from users.name — so mirroring it would add a second write
   // that can fail independently, for no reader.
+  await logActivity(session!, {
+    action: "account.edit",
+    entityType: "user",
+    entityId: userId,
+    summary: `Edited their own account: ${Object.keys(updates).join(", ")}`,
+    details: { fields: Object.keys(updates) },
+  });
+
   return NextResponse.json({ ok: true, changed: Object.keys(updates).length });
 }

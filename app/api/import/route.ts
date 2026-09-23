@@ -7,6 +7,7 @@ import { ensureApiKeysTable } from "@/lib/db/ensure-tables";
 import Papa from "papaparse";
 import crypto from "crypto";
 import { importOrderRows } from "@/lib/import-rows";
+import { logActivity, SYSTEM_ACTOR } from "@/lib/activity";
 
 async function verifyApiKey(keyString: string): Promise<boolean> {
   try {
@@ -107,6 +108,48 @@ export async function POST(request: NextRequest) {
     .update(csvImports)
     .set({ successCount, errorCount: errors.length, status: "done" })
     .where(eq(csvImports.id, importId));
+
+  /**
+   * ONE entry per import, never one per row.
+   *
+   * A single upload of the standing MTO sheet touches hundreds of orders. Per
+   * order that would be several hundred audit rows for one human action, and a
+   * day of real activity would be unreadable underneath it. The csv_imports
+   * record already holds the per-row detail — including every error — so this
+   * entry names the file and the counts and leaves the breakdown where it
+   * already lives.
+   *
+   * The cost of that choice, stated plainly: searching an order id will NOT
+   * show that an import touched it. Human changes to that order still appear.
+   */
+  // This route accepts either a signed-in internal user or an API key that
+  // borrows an admin's id for imported_by, so there is no session to hand over.
+  // The actor is rebuilt from the resolved userId, and falls back to the system
+  // actor when the import was machine-triggered.
+  const [actor] = await db
+    .select({ id: users.id, name: users.name, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  await logActivity(
+    actor
+      ? { user: { id: String(actor.id), name: actor.name, role: actor.role } }
+      : SYSTEM_ACTOR,
+    {
+    action: "import.run",
+    entityType: "import",
+    entityId: importId,
+    summary: `Imported ${(file as File).name}: ${successCount} row${successCount !== 1 ? "s" : ""} applied, ${errors.length} error${errors.length !== 1 ? "s" : ""}`,
+    details: {
+      filename: (file as File).name,
+      rows: rawRows.length,
+      successCount,
+      errorCount: errors.length,
+      ignoredHeaders,
+    },
+  }
+  );
 
   // ignoredHeaders is reported rather than swallowed. A column whose title has
   // drifted out of HEADER_MAP is dropped silently and the import still says it

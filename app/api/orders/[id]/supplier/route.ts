@@ -4,6 +4,7 @@ import { orderItems, statusHistory, suppliers } from "@/lib/db/schema";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { denyUnlessAdmin } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 
 /**
  * Admin reassignment: change the manufacturer on an order that ALREADY has one.
@@ -104,6 +105,24 @@ export async function PATCH(
     changedBy: me,
     changedAt: now,
     note: `Manufacturer reassigned by admin`,
+  });
+
+  // Admin reassignment of an ALREADY-assigned order. Distinct from
+  // order.assign, which is the PO being built in the first place — this is
+  // someone overriding that decision afterwards, which is exactly the kind of
+  // change an audit trail exists to surface.
+  await logActivity(session!, {
+    action: "order.reassign",
+    entityType: "order",
+    entityId: orderItemId,
+    orderItemId,
+    supplierId,
+    supplierName: supplier.name,
+    summary: `Reassigned order ${orderItemId} from ${current.name ?? "its previous supplier"} to ${supplier.name}`,
+    details: {
+      from: { id: current.supplierId, name: current.name },
+      to: { id: supplierId, name: supplier.name },
+    },
   });
 
   return NextResponse.json({ ok: true, supplierId, supplierName: supplier.name });

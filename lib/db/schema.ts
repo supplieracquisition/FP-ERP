@@ -21,6 +21,7 @@ export const testPrintQueue = dialect.testPrintQueue;
 export const apiKeys = dialect.apiKeys;
 export const pobFabricColors = dialect.pobFabricColors;
 export const pobProductFabricMapping = dialect.pobProductFabricMapping;
+export const activityLog = dialect.activityLog;
 
 export const suppliersRelations = dialect.suppliersRelations;
 export const usersRelations = dialect.usersRelations;

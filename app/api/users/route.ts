@@ -4,6 +4,8 @@ import { users } from "@/lib/db/schema";
 import { asc, ne } from "drizzle-orm";
 import { requireInternal, denyUnlessAdmin } from "@/lib/permissions";
 import { inviteUser, type InvitableRole } from "@/lib/invite";
+import { auth } from "@/lib/auth";
+import { logActivity } from "@/lib/activity";
 
 /**
  * The team roster. Readable by any internal user — knowing who your colleagues
@@ -59,6 +61,15 @@ export async function POST(request: NextRequest) {
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
+
+  const session = await auth();
+  await logActivity(session!, {
+    action: "user.create",
+    entityType: "user",
+    entityId: result.userId,
+    summary: `Added team member ${name} (${email}) as ${role}`,
+    details: { email, role, invited: result.invited },
+  });
 
   return NextResponse.json({ ok: true, userId: result.userId, invited: result.invited });
 }
