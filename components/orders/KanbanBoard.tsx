@@ -314,8 +314,8 @@ function ClaimBar({ item, userId, userRole, team, onRefresh }: {
   );
 }
 
-function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = [], userId, team = [] }: {
-  item: OrderItem; isDragging?: boolean; onRefresh: () => void; userRole?: string; suppliers?: Supplier[];
+function OrderCard({ item, isDragging = false, onRefresh, userRole, nominateSuppliers = [], userId, team = [] }: {
+  item: OrderItem; isDragging?: boolean; onRefresh: () => void; userRole?: string; nominateSuppliers?: Supplier[];
   userId?: number; team?: TeamMember[];
 }) {
   const fmt = (d: string | null) => d ? format(new Date(d), "MM/dd/yy") : null;
@@ -488,7 +488,7 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
                   className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                 >
                   <option value="">Select supplier...</option>
-                  {suppliers.map((s) => (
+                  {nominateSuppliers.map((s) => (
                     <option key={s.id} value={String(s.id)}>{s.name}</option>
                   ))}
                 </select>
@@ -517,9 +517,9 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, suppliers = 
   );
 }
 
-function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, onToggleDelivered, deliveredCount, suppliers = [], userId, team = [] }: {
+function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, onToggleDelivered, deliveredCount, nominateSuppliers = [], userId, team = [] }: {
   column: { id: string; label: string }; items: OrderItem[]; onRefresh: () => void; userRole?: string;
-  showDelivered?: boolean; onToggleDelivered?: () => void; deliveredCount?: number; suppliers?: Supplier[];
+  showDelivered?: boolean; onToggleDelivered?: () => void; deliveredCount?: number; nominateSuppliers?: Supplier[];
   userId?: number; team?: TeamMember[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
@@ -546,15 +546,15 @@ function DroppableColumn({ column, items, onRefresh, userRole, showDelivered, on
         className={`flex-1 min-h-[120px] rounded-lg p-2 space-y-2 transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : "bg-gray-100"}`}>
         {items.map((item) => (
           <DraggableCard key={item.orderItemId} item={item} onRefresh={onRefresh} userRole={userRole}
-            suppliers={suppliers} userId={userId} team={team} />
+            nominateSuppliers={nominateSuppliers} userId={userId} team={team} />
         ))}
       </div>
     </div>
   );
 }
 
-function DraggableCard({ item, onRefresh, userRole, suppliers = [], userId, team = [] }: {
-  item: OrderItem; onRefresh: () => void; userRole?: string; suppliers?: Supplier[];
+function DraggableCard({ item, onRefresh, userRole, nominateSuppliers = [], userId, team = [] }: {
+  item: OrderItem; onRefresh: () => void; userRole?: string; nominateSuppliers?: Supplier[];
   userId?: number; team?: TeamMember[];
 }) {
   const locked = lockedByOther(item, userId);
@@ -575,14 +575,27 @@ function DraggableCard({ item, onRefresh, userRole, suppliers = [], userId, team
     : undefined;
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <OrderCard item={item} onRefresh={onRefresh} userRole={userRole} suppliers={suppliers}
+      <OrderCard item={item} onRefresh={onRefresh} userRole={userRole} nominateSuppliers={nominateSuppliers}
         userId={userId} team={team} />
     </div>
   );
 }
 
-export function KanbanBoard({ suppliers, userRole, userId, team = [] }: {
-  suppliers: Supplier[]; userRole?: string; userId?: number; team?: TeamMember[];
+/**
+ * Two supplier lists, deliberately.
+ *
+ * `suppliers` fills the Manufacturer FILTER, which matches on supplier_id —
+ * orders already assigned — so it is scoped to what this user can see.
+ *
+ * `nominateSuppliers` fills the Nominate Supplier dropdown on a pool card, and
+ * is every active supplier for every internal user. Nomination names who should
+ * MAKE the order and the PO Builder assigns to whoever is nominated, so
+ * narrowing this list silently takes manufacturers away from a team member
+ * rather than merely hiding them. See the comments in app/(internal)/orders.
+ */
+export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userId, team = [] }: {
+  suppliers: Supplier[]; nominateSuppliers?: Supplier[];
+  userRole?: string; userId?: number; team?: TeamMember[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -885,7 +898,7 @@ export function KanbanBoard({ suppliers, userRole, userId, team = [] }: {
                 showDelivered={col.id === "shipped" ? showDelivered : undefined}
                 onToggleDelivered={col.id === "shipped" ? () => setShowDelivered(!showDelivered) : undefined}
                 deliveredCount={col.id === "shipped" ? grouped["completed"]?.length : undefined}
-                suppliers={suppliers} userId={userId} team={team} />
+                nominateSuppliers={nominateSuppliers} userId={userId} team={team} />
             ))}
           </div>
         </div>
