@@ -47,14 +47,20 @@ export default async function InternalLayout({
               >
                 Product Library
               </Link>
-              {session.user.role === "admin" && (
-                <Link
-                  href="/suppliers"
-                  className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
-                >
-                  Suppliers
-                </Link>
-              )}
+              {/* Team-facing, not admin-only. The page and its API have always
+                  admitted any internal user — adding a supplier, editing its
+                  operational fields and inviting a portal login are ordinary
+                  team work — so hiding the link only meant the people who could
+                  use the tab had to know the URL. The one genuinely admin part
+                  is reassigning a supplier's POC, which decides who sees which
+                  orders: the control is hidden here (canReassignPoc) and
+                  refused by PATCH /api/suppliers/[id] regardless. */}
+              <Link
+                href="/suppliers"
+                className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
+              >
+                Suppliers
+              </Link>
               {session.user.role === "admin" && (
                 <>
                   <Link

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiKeys, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAdmin } from "@/lib/permissions";
+import { adminSession } from "@/lib/permissions";
 import { logActivity } from "@/lib/activity";
 import { ensureApiKeysTable } from "@/lib/db/ensure-tables";
 import crypto from "crypto";
@@ -13,7 +13,13 @@ function generateKey(): string {
 }
 
 export async function GET(request: NextRequest) {
-  await requireAdmin();
+  // adminSession() rather than requireAdmin(): requireAdmin() signals by
+  // redirect(), and fetch() follows the hop to a page and reports res.ok, so a
+  // refused request reads as a successful one. On this screen that meant a
+  // non-admin got the full key-management UI with an empty table and a Create
+  // button that quietly did nothing.
+  const { denied } = await adminSession();
+  if (denied) return denied;
   await ensureApiKeysTable();
 
   try {
@@ -33,7 +39,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await requireAdmin();
+  const { session, denied } = await adminSession();
+  if (denied) return denied;
   await ensureApiKeysTable();
 
   const { name } = await request.json();
@@ -81,7 +88,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const session = await requireAdmin();
+  const { session, denied } = await adminSession();
+  if (denied) return denied;
   await ensureApiKeysTable();
 
   const { keyId } = await request.json();
