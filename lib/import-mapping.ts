@@ -99,15 +99,22 @@ export const HEADER_MAP: Record<string, string> = {
   tracking_number: "trackingNumber",
   tracking: "trackingNumber",
   shipping_method: "shippingMethod",
-  // The receiver's Attn name on the PO. "Client Name" is the authoritative
-  // column and is listed first deliberately: before it existed, this field was
-  // being filled by the looser "Client" spelling, which in the live sheet holds
-  // the ORDER MANAGER — so POs went out addressed to a manager's email instead
-  // of the client. Once the export carries both, mapRow() takes "Client Name"
-  // whichever side of the sheet it sits on.
+  // The receiver's Attn name on the PO. Only the "Client Name" column feeds
+  // this, under its two spellings — there is deliberately NO bare "Client"
+  // alias.
+  //
+  // There was one, and it is how a manager's email reached the factory: in the
+  // live sheet "Client" holds the ORDER MANAGER, not the client. Precedence
+  // alone (mapRow keeps "Client Name" ahead of it) was not enough, because a
+  // fallback still fires for any export that carries "Client" and not "Client
+  // Name" — which is every export that predates the real column. An Attn line
+  // the builder can see is blank beats one quietly filled with the wrong
+  // person, so this field now has no fallback at all.
+  //
+  // Do not re-add "client" here. If an export ever carries the client under
+  // some other title, add THAT title.
   client_name: "clientName",
   clients_name: "clientName",
-  client: "clientName",
   delivery_address: "deliveryAddress",
   address: "deliveryAddress",
   order_address: "deliveryAddress",
@@ -137,17 +144,22 @@ const FIELD_ALIASES: [string, string[]][] = (() => {
  * sitting further RIGHT silently wins. The field's meaning then depends on
  * column order in the export, which nobody controls and no error reports.
  *
- * That is exactly the collision "Client Name" walks into: it shares a field
- * with the looser "Client" spelling, and clientName is what the PO prints as
- * the receiver's Attn name. With the naive loop, adding the real column would
- * fix the PO or not depending on which column the export happened to emit last.
+ * deliveryAddress is the live example: "Delivery Address", "Address" and
+ * "Order Address" all mean it, and with the naive loop which one an export
+ * happened to emit last decided the value.
  *
  * So precedence is explicit: the first spelling listed in HEADER_MAP wins, and
  * a later alias is consulted ONLY when the preferred column is absent from the
  * file entirely. Deliberately not "absent or blank on this row" — a blank cell
  * in the authoritative column is a statement that the value is unknown, and
- * falling through to "Client" there would put an order manager's email back on
- * a PO for exactly the rows nobody filled in.
+ * falling through to a looser spelling there would fill in a value for exactly
+ * the rows somebody left empty on purpose.
+ *
+ * Note what precedence can and cannot do. It orders aliases that all genuinely
+ * mean the same field. It is NOT a way to keep a column that means something
+ * else at arm's length: clientName used to list "Client" as a last resort, and
+ * the fallback still fired for every export that lacked "Client Name" — which
+ * put the order manager's email on POs. That alias is gone rather than demoted.
  */
 export function mapRow(row: Record<string, string>): Record<string, string> {
   const mapped: Record<string, string> = {};
@@ -309,17 +321,23 @@ export const PARSE: Record<string, (raw: string) => unknown> = {
   quantity: (raw) => toNumber(raw, (s) => parseInt(s, 10)),
   totalValue: (raw) => toNumber(raw, parseFloat),
   requiresTestPrint: (raw) => ["true", "yes", "1"].includes(raw.toLowerCase()),
-  // An Attn name is a person; it is never an email address. This is a belt on
-  // top of mapRow()'s precedence, covering the window before the export carries
-  // "Client Name" at all — and the next time a column's contents change without
-  // its title changing, which is how the manager's email got here in the first
-  // place.
+  // An Attn name is a person; a cell holding nothing but an email address is
+  // not one. The belt to go with the braces of having no "Client" alias above:
+  // it catches the case that alias could not, which is a column whose CONTENTS
+  // change to emails without its title changing — how the manager's address got
+  // here in the first place.
   //
   // Refusing the value rather than passing it through means a PO shows a blank
   // Attn line instead of the order manager's email. Blank is visibly wrong to
   // whoever is building the PO and gets fixed in the builder; a plausible-looking
   // filled-in field addressed to the wrong person goes to the factory unnoticed.
-  clientName: (raw) => (/\S+@\S+\.\S+/.test(raw) ? null : raw || null),
+  //
+  // ANCHORED, deliberately. Unanchored this was a substring test, so a real name
+  // that merely contained an address anywhere in the cell — "Acme Corp
+  // (billing@acme.com)" — was discarded whole, and the PO lost a name the sheet
+  // had correctly supplied. The rule only has to recognise a cell that IS an
+  // email; a cell that merely mentions one still carries a usable name.
+  clientName: (raw) => (/^\S+@\S+\.\S+$/.test(raw.trim()) ? null : raw || null),
 };
 
 /** Sentinel for a normalized key that more than one supplier collapses onto. */
