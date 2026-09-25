@@ -3,7 +3,26 @@ import { notifications, suppliers, users, orderItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { sendMail } from "@/lib/email";
 
-export type NotificationType = "comment" | "issue_report" | "test_print" | "status_change";
+export type NotificationType =
+  | "comment"
+  | "issue_report"
+  | "test_print"
+  | "status_change"
+  /**
+   * A PO was built and the order now belongs to a manufacturer. Directed at
+   * "team", which reaches that supplier's POC — see the recipient note on
+   * `audience` below.
+   */
+  | "assignment";
+/**
+ * Who a notification is for.
+ *
+ * There is no recipient column on `notifications` — delivery is decided on
+ * read. GET /api/notifications shows a supplier the "supplier" rows for their
+ * own supplier, and shows an internal user the "team" rows for the suppliers
+ * they are POC of (an admin sees everything). So "team" does not mean everyone
+ * internal: one team row is how you reach exactly that supplier's POC.
+ */
 export type Audience = "team" | "supplier";
 
 interface CreateNotificationOptions {

@@ -19,6 +19,7 @@ const TYPE_ICON: Record<string, string> = {
   issue_report: "⚠️",
   test_print: "🖨️",
   status_change: "📦",
+  assignment: "🏭",
 };
 
 function timeAgo(iso: string) {
@@ -29,7 +30,21 @@ function timeAgo(iso: string) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function NotificationBell() {
+/**
+ * `orderBasePath` is where clicking a notification goes.
+ *
+ * Both layouts render this bell, but an order lives at two different URLs: the
+ * internal /orders/[id] and the supplier /supplier/orders/[id]. It was hardcoded
+ * to the internal one, so every notification a supplier clicked took them to a
+ * page requireInternal() promptly redirected them out of — their own comment
+ * replies and status changes included. The caller says which app it is in
+ * rather than this component guessing from the session.
+ */
+export default function NotificationBell({
+  orderBasePath = "/orders",
+}: {
+  orderBasePath?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -71,7 +86,7 @@ export default function NotificationBell() {
 
   function handleNotificationClick(n: Notification) {
     setOpen(false);
-    router.push(`/orders/${n.orderItemId}`);
+    router.push(`${orderBasePath}/${n.orderItemId}`);
   }
 
   return (
