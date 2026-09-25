@@ -99,6 +99,44 @@ export async function denyUnlessAdmin(): Promise<NextResponse | null> {
 }
 
 /**
+ * The whole admin gate for a route handler, returning the session so the
+ * caller does not have to fetch it twice.
+ *
+ * denyUnlessAdmin() above is the same gate for handlers that need no session.
+ * This exists for the ones that do — an admin route that writes an audit entry
+ * needs to say who acted — and it is the shape to reach for rather than
+ * requireAdmin(), which signals by redirect(): a 307 that fetch() follows to a
+ * page and reports as res.ok, so a refused request reads as a successful one.
+ * The API-keys screen sat behind exactly that and silently did nothing for a
+ * non-admin instead of refusing.
+ *
+ * Returned as a discriminated union, like internalSession(), so that
+ * `if (denied) return denied;` narrows `session` to non-null with no non-null
+ * assertion at the call site.
+ *
+ * Impersonation is refused explicitly. applyImpersonation() rewrites `role` to
+ * "supplier" while leaving `user.id` as the ADMIN's, so the role check below
+ * happens to catch it too; this states the reason so neither check reads as
+ * redundant.
+ */
+export async function adminSession(): Promise<
+  { session: AppSession; denied: null } | { session: null; denied: NextResponse }
+> {
+  const refuse = (error: string, status = 403) => ({
+    session: null as null,
+    denied: NextResponse.json({ error }, { status }),
+  });
+
+  const session = await auth();
+  if (!session?.user) return refuse("Not signed in", 401);
+  if (session.impersonating)
+    return refuse("Read-only while previewing a supplier account");
+  if (session.user.role !== "admin") return refuse("Admin only");
+
+  return { session, denied: null };
+}
+
+/**
  * Self-service check for the routes an internal user edits their OWN account
  * through.
  *

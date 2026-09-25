@@ -63,7 +63,9 @@ export default async function SupplierLayout({ children }: { children: React.Rea
               {pocName && <div className="text-xs font-medium text-gray-700">{pocName}</div>}
               <div className="text-xs text-gray-500">{session.user.email}</div>
             </div>
-            {!session.impersonating && <NotificationBell />}
+            {!session.impersonating && (
+              <NotificationBell orderBasePath="/supplier/orders" />
+            )}
             {!session.impersonating && (
               <form action={signOut}>
                 <button type="submit" className="text-xs text-gray-500 hover:text-gray-900 transition-colors">

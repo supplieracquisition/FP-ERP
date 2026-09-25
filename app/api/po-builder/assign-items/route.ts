@@ -5,6 +5,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { internalSession, denyOrderRowIds } from "@/lib/permissions";
 import { claimCutoff, heldBy, allClaimable } from "@/lib/claims";
 import { logActivity } from "@/lib/activity";
+import { createNotification } from "@/lib/createNotification";
 
 /**
  * Building the PO: the event that completes a claim and takes an order out of
@@ -82,8 +83,11 @@ export async function POST(request: NextRequest) {
   const outOfScope = await denyOrderRowIds(session, ids);
   if (outOfScope) return outOfScope;
 
+  // pocUserId comes back alongside the name because the notification below
+  // needs to know whose manufacturer this is, and whether that is the same
+  // person building the PO.
   const [supplier] = await db
-    .select({ name: suppliers.name })
+    .select({ name: suppliers.name, pocUserId: suppliers.pocUserId })
     .from(suppliers)
     .where(eq(suppliers.id, supplierId))
     .limit(1);
@@ -225,6 +229,78 @@ export async function POST(request: NextRequest) {
         summary: `Built the PO for order ${row.orderItemId} — assigned to ${supplier.name}`,
         details: { productionStage, poOrderCount: assigned.length },
       });
+    }
+
+    /**
+     * Tell both sides, in the tool only: the supplier's POC, and the
+     * manufacturer itself.
+     *
+     * The POC handles the manufacturer; the processor who builds the PO is
+     * often somebody else entirely — that separation is the whole point of
+     * processor_user_id — so without this the person who owns the relationship
+     * finds out by noticing a new card on the board, or not at all. The
+     * manufacturer needs the same news for the obvious reason: it is the work.
+     *
+     * Two rows per order, not one. `audience` is the only routing there is —
+     * notifications has no recipient column, and GET /api/notifications gives a
+     * supplier the "supplier" rows for their own supplier and an internal user
+     * the "team" rows for the suppliers they are POC of. A single row cannot be
+     * read by both.
+     *
+     * In-app only, by omitting sendEmail. createNotification() mails
+     * logistics@ and CCs the POC when that flag is set, which is the right
+     * shape for a supplier ACTING on an order and the wrong one for routine
+     * internal assignment: this fires on every PO, and a shared inbox is not
+     * where "your manufacturer got another order" belongs.
+     *
+     * One row per order item, matching the activity entries above, because
+     * notifications.order_item_id is NOT NULL and the bell navigates to it —
+     * a single row for a multi-item PO would take four of the five orders
+     * nowhere.
+     *
+     * The POC is told even when the POC is the person who built the PO. It
+     * reads as redundant in the moment and is the right default anyway: the
+     * bell doubles as that supplier's history, and a feed missing exactly the
+     * orders you handled yourself is a worse thing to read back.
+     *
+     * Wrapped like the history insert above, and for the same reason: the
+     * assignment has already committed, and a notification failure must not
+     * turn a successful request into an error the caller would retry into a
+     * 409.
+     */
+    try {
+      for (const row of assigned as { orderItemId: string }[]) {
+        // The assigner's name is in the text because the bell renders
+        // `message` and nothing else — it fetches triggeredByName and never
+        // shows it. "Who assigned this" has to survive in the sentence.
+        if (supplier.pocUserId) {
+          await createNotification({
+            type: "assignment",
+            orderItemId: row.orderItemId,
+            triggeredBy: me,
+            message: `${session.user.name} assigned order ${row.orderItemId} to ${supplier.name}`,
+            audience: "team",
+          });
+        }
+
+        // Addressed to the manufacturer, so it says "you" rather than naming
+        // them back at themselves. Naming the internal assigner matches what
+        // suppliers already see on comment notifications.
+        await createNotification({
+          type: "assignment",
+          orderItemId: row.orderItemId,
+          triggeredBy: me,
+          message: `${session.user.name} assigned order ${row.orderItemId} to you`,
+          audience: "supplier",
+        });
+      }
+    } catch (notifyErr) {
+      console.error(
+        `[assign-items] assignment committed but notifying failed for ${assigned
+          .map((r: { orderItemId: string }) => r.orderItemId)
+          .join(", ")}:`,
+        notifyErr
+      );
     }
 
     return NextResponse.json({ ok: true, assigned: assigned.length });
