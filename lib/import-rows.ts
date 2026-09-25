@@ -80,7 +80,32 @@ export async function importOrderRows(
   // alone on update rather than written as null — see suppliedFields(). This is
   // what stops a CSV without a "requires test print" column from resetting that
   // flag to false on every row it touches.
-  const headers = Object.keys(rawRows[0] ?? {});
+  //
+  // Every row, not rawRows[0]. The parser builds each row by zipping the header
+  // line against that row's fields, so a row with FEWER fields than headers
+  // simply has no key for the trailing ones. Taking the header list from the
+  // first row alone therefore let one short row at the top of a file decide
+  // that the last columns did not exist — for the whole import, including the
+  // rows that did carry values.
+  //
+  // That is not hypothetical: it silently emptied Client Name and Delivery
+  // Address, which are the sheet's two rightmost columns and so exactly the
+  // ones an exporter drops when a row leaves them blank. It reported nothing,
+  // because the header line really does contain them and ignoredHeaders is
+  // computed from the same short list.
+  //
+  // A field counts as supplied when ANY row carries it. Deliberately not the
+  // parser's header line: a column every row omits is, for this file's
+  // purposes, absent — and absent must keep meaning "leave the stored value
+  // alone" rather than "write null over it".
+  const headerSet = new Set<string>();
+  for (const row of rawRows) {
+    for (const key of Object.keys(row)) {
+      // The parser's bucket for fields BEYOND the header line. Never a column.
+      if (key !== "__parsed_extra") headerSet.add(key);
+    }
+  }
+  const headers = [...headerSet];
   const present = suppliedFields(headers);
   const ignoredHeaders = unmappedHeaders(headers);
 
