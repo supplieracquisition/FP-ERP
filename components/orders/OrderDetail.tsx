@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { calendarDateOrNull } from "@/lib/calendar-date";
 
 const COLUMN_OPTIONS = [
   { value: "sample_production", label: "Sample Production" },
@@ -259,7 +260,14 @@ export function OrderDetail({ orderItemId, userRole }: {
   const [editingField, setEditingField] = useState<"supplierShipDate" | "inHandsDate" | "testPrintDate" | "assignedDate" | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const fmt = (d: string | null) => d ? format(new Date(d), "MMM d, yyyy") : "—";
+  // fmt is for the stored calendar-date columns, which are pinned to UTC
+  // midnight; formatting those straight through date-fns showed the previous
+  // day for any viewer west of UTC. fmtFull is for real event timestamps
+  // (comments, history) where the local clock IS the right one — leave it.
+  const fmt = (d: string | null) => {
+    const c = calendarDateOrNull(d);
+    return c ? format(c, "MMM d, yyyy") : "—";
+  };
   const fmtFull = (d: string | null) => d ? format(new Date(d), "MMM d, yyyy h:mm a") : "—";
 
   const isAdmin = userRole === "admin";
@@ -299,7 +307,12 @@ export function OrderDetail({ orderItemId, userRole }: {
   async function saveDateEdit(field: "supplierShipDate" | "inHandsDate" | "testPrintDate" | "assignedDate") {
     setSaving(true);
     const payload: Record<string, unknown> = {};
-    payload[field] = editValue ? new Date(editValue).toISOString() : null;
+    // The input gives a bare "YYYY-MM-DD". Pin it to UTC midnight explicitly,
+    // the same shape toIsoTimestamp() writes on import, rather than leaning on
+    // new Date() happening to parse a date-only string as UTC — that read like
+    // a local-midnight conversion and made the storage convention look like an
+    // accident. Display goes back through calendarDate(), so the two agree.
+    payload[field] = editValue ? `${editValue}T00:00:00.000Z` : null;
 
     const res = await fetch(`/api/orders/${orderItemId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -330,7 +343,7 @@ export function OrderDetail({ orderItemId, userRole }: {
       // supplierShipDate, not printerShipDate. This delay flow used to write a
       // different column from the one the pencil-edit above writes and the page
       // displays — so recording a delay updated a date nobody could see.
-      body: JSON.stringify({ supplierShipDate: new Date(newShipDate).toISOString(), delayReason }),
+      body: JSON.stringify({ supplierShipDate: `${newShipDate}T00:00:00.000Z`, delayReason }),
     });
     setSaving(false);
     if (res.ok) { toast.success("Ship date updated"); setEditShipDate(false); load(); }
