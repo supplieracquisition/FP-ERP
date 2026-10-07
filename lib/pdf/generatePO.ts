@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { format } from "date-fns";
+import { calendarDate } from "@/lib/calendar-date";
 
 type Supplier = { id: number; name: string; nickname: string | null; contactEmail: string | null };
 
@@ -20,7 +21,10 @@ type LineItem = {
 function fmtDate(d: string): string {
   if (!d) return "";
   try {
-    return format(new Date(d), "M/d/yyyy");
+    // Calendar date, read as one. This was only ever correct because Vercel
+    // runs the renderer in UTC — the same input printed the previous day on a
+    // developer's machine, and would in prod too if the region ever moved.
+    return format(calendarDate(d), "M/d/yyyy");
   } catch {
     return d;
   }

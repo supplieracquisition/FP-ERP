@@ -16,7 +16,8 @@ import {
 } from "@dnd-kit/core";
 import { useRouter } from "next/navigation";
 import { CSS } from "@dnd-kit/utilities";
-import { format, differenceInDays } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
+import { calendarDate, calendarDateOrNull } from "@/lib/calendar-date";
 import { toast } from "sonner";
 
 type Supplier = { id: number; name: string };
@@ -318,7 +319,10 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, nominateSupp
   item: OrderItem; isDragging?: boolean; onRefresh: () => void; userRole?: string; nominateSuppliers?: Supplier[];
   userId?: number; team?: TeamMember[];
 }) {
-  const fmt = (d: string | null) => d ? format(new Date(d), "MM/dd/yy") : null;
+  const fmt = (d: string | null) => {
+    const c = calendarDateOrNull(d);
+    return c ? format(c, "MM/dd/yy") : null;
+  };
   const col = effectiveColumn(item);
   const isShipped = item.status === "shipped" || item.status === "completed";
   const isSupplier = userRole === "supplier";
@@ -327,8 +331,12 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, nominateSupp
   // DraggableCard refuses to make it draggable at all.
   const locked = lockedByOther(item, userId);
 
+  // All three counts below are in whole CALENDAR days, matching the date the
+  // card prints. differenceInDays() measured raw elapsed time to a UTC
+  // midnight and truncated, so a card reading 10/08 sat next to "ships in 0
+  // days" for the whole of the 7th.
   const shipsInDays = item.supplierShipDate
-    ? differenceInDays(new Date(item.supplierShipDate), new Date())
+    ? differenceInCalendarDays(calendarDate(item.supplierShipDate), new Date())
     : null;
 
   const handleNominateSupplier = async (supplierId: string) => {
@@ -346,11 +354,11 @@ function OrderCard({ item, isDragging = false, onRefresh, userRole, nominateSupp
   };
 
   const shippedDaysLate = isShipped && item.supplierShipDate && item.dueDate
-    ? differenceInDays(new Date(item.supplierShipDate), new Date(item.dueDate))
+    ? differenceInCalendarDays(calendarDate(item.supplierShipDate), calendarDate(item.dueDate))
     : null;
 
   const daysOverdue = !isShipped && item.supplierShipDate
-    ? differenceInDays(new Date(), new Date(item.supplierShipDate))
+    ? differenceInCalendarDays(new Date(), calendarDate(item.supplierShipDate))
     : null;
   const isOverdue = daysOverdue !== null && daysOverdue >= 1;
 
@@ -784,7 +792,7 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
     if (decorationFilter && !(i.decoratingMethods ?? "").split(";").map((s) => s.trim()).includes(decorationFilter)) return false;
     if (printTypeFilter && !(i.printType ?? "").split(";").map((s) => s.trim()).includes(printTypeFilter)) return false;
     if (shipDateFilter && i.supplierShipDate) {
-      const days = differenceInDays(new Date(i.supplierShipDate), new Date());
+      const days = differenceInCalendarDays(calendarDate(i.supplierShipDate), new Date());
       if (shipDateFilter === "today" && days !== 0 && days >= 0) return false;
       if (shipDateFilter === "3"  && days > 3)  return false;
       if (shipDateFilter === "7"  && days > 7)  return false;

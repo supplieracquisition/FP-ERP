@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { format, isAfter, differenceInDays } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
+import { calendarDate, calendarDateOrNull } from "@/lib/calendar-date";
 
 type Supplier = { id: number; name: string };
 type OrderItem = {
@@ -151,10 +152,15 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
     if (!item.dueDate) return false;
     const stage = effectiveStage(item);
     if (stage === "shipped" || stage === "completed") return false;
-    return isAfter(new Date(), new Date(item.dueDate));
+    // Whole calendar days, not instants. isAfter() against the stored UTC
+    // midnight called an order overdue from 8pm local on its own due date.
+    return differenceInCalendarDays(new Date(), calendarDate(item.dueDate)) > 0;
   };
 
-  const fmt = (d: string | null) => d ? format(new Date(d), "MMM d, yyyy") : "—";
+  const fmt = (d: string | null) => {
+    const c = calendarDateOrNull(d);
+    return c ? format(c, "MMM d, yyyy") : "—";
+  };
 
   const totalPages = Math.ceil(total / 50);
 
@@ -387,8 +393,12 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
                   const shipDateChanged = item.originalSupplierShipDate &&
                     item.supplierShipDate &&
                     item.originalSupplierShipDate !== item.supplierShipDate;
+                  // Counted in calendar days against the date the cell renders.
+                  // differenceInDays() measured the gap to UTC midnight and
+                  // truncated it, so an order shipping tomorrow read as 0 days
+                  // all afternoon.
                   const shipsInDays = item.supplierShipDate
-                    ? differenceInDays(new Date(item.supplierShipDate), new Date())
+                    ? differenceInCalendarDays(calendarDate(item.supplierShipDate), new Date())
                     : null;
                   const shipUrgent = shipsInDays !== null && shipsInDays <= 3 && shipsInDays >= 0;
 
