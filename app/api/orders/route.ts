@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, suppliers, statusHistory, comments, orderImages, csvImports, csvImportErrors, notifications, notificationReads, testPrintQueue } from "@/lib/db/schema";
-import { eq, and, sql, asc, desc } from "drizzle-orm";
+import { eq, and, sql, asc, desc, inArray } from "drizzle-orm";
 import { requireAuth, denyNonAdmin, orderScope } from "@/lib/permissions";
 import { IN_POOL, claimable, claimCutoff, claimIsActive } from "@/lib/claims";
 import { logActivity } from "@/lib/activity";
+import { ordersToCsv, exportFilename } from "@/lib/orders-export";
 import { addDays, format } from "date-fns";
 
 const BASE_SELECT = {
@@ -41,6 +42,49 @@ const BASE_SELECT = {
 };
 
 /**
+ * What the CSV export selects.
+ *
+ * Separate from BASE_SELECT rather than reusing it, because the two answer to
+ * different things. BASE_SELECT is shaped by what the table and the Kanban
+ * draw; this is shaped by EXPORT_COLUMNS in lib/orders-export.ts, which is
+ * shaped in turn by what the IMPORTER can read back. Two of these columns —
+ * assigned date and print locations — are importable and exportable but have
+ * never been needed on screen, and folding them into BASE_SELECT would have
+ * widened every orders query in the app to serve a file.
+ *
+ * Keep the keys in step with the `field` values in EXPORT_COLUMNS: a field
+ * named there and missing here exports as an empty column, silently.
+ */
+const EXPORT_SELECT = {
+  orderId: orderItems.orderId,
+  orderItemId: orderItems.orderItemId,
+  orderName: orderItems.orderName,
+  orderCreatedAt: orderItems.orderCreatedAt,
+  styleCode: orderItems.styleCode,
+  color: orderItems.color,
+  supplierName: suppliers.name,
+  assignedDate: orderItems.assignedDate,
+  supplierShipDate: orderItems.supplierShipDate,
+  originalSupplierShipDate: orderItems.originalSupplierShipDate,
+  dueDate: orderItems.dueDate,
+  printType: orderItems.printType,
+  printLocations: orderItems.printLocations,
+  decoratingMethods: orderItems.decoratingMethods,
+  quantity: orderItems.quantity,
+  totalValue: orderItems.totalValue,
+  requiresTestPrint: orderItems.requiresTestPrint,
+  trackingNumber: orderItems.trackingNumber,
+  shippingMethod: orderItems.shippingMethod,
+  templatePdf: orderItems.templatePdf,
+  clientName: orderItems.clientName,
+  deliveryAddress: orderItems.deliveryAddress,
+  status: orderItems.status,
+  productionStage: orderItems.productionStage,
+  testPrintStatus: orderItems.testPrintStatus,
+  delayReason: orderItems.delayReason,
+};
+
+/**
  * Stamp each row with whether its claim is live.
  *
  * Computed here rather than in the browser on purpose. The client's clock is
@@ -68,23 +112,38 @@ async function buildConditions(params: URLSearchParams, session: { user: { id: s
     conditions.push(sql`${orderItems.status} != 'completed' AND ${orderItems.status} != 'delivered'`);
   }
 
-  // Who this session may see at all. Supplier scoping and internal POC scoping
-  // both live in here now; only an admin gets undefined back. Pushed before the
-  // request's own filters so everything below can only ever narrow it further.
+  // Who this session may see at all. Only a supplier gets a restriction back
+  // now — the internal team sees every order; see orderScope(). Pushed before
+  // the request's own filters so everything below can only narrow it further.
   const scope = await orderScope(session);
   if (scope) conditions.push(scope);
 
   if (!isSupplier) {
-    // A supplier filter from the query string. This is an intersection with the
-    // scope above, never an escape from it: an internal user asking for a
-    // supplier they do not handle gets no rows rather than that supplier's work.
-    const supplierIdParam = params.get("supplierId") ?? "";
-    if (supplierIdParam === "0") {
-      conditions.push(IN_POOL);
-    } else if (supplierIdParam) {
-      conditions.push(eq(orderItems.supplierId, Number(supplierIdParam)));
-    }
+    // A supplier filter from the query string: one id, several comma-separated
+    // ids, or "0" for the unassigned pool, which may be combined with real ids.
+    // An intersection with the scope above, never an escape from it.
+    //
+    // NaN is filtered out rather than passed through. Number("") is 0, which is
+    // the pool sentinel, so a trailing comma in the parameter would otherwise
+    // silently add every unassigned order to a filter that asked for neither.
+    const raw = (params.get("supplierId") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
+    const wantsPool = raw.includes("0");
+    const ids = raw
+      .filter((s) => s !== "0")
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    if (wantsPool && ids.length) {
+      conditions.push(sql`(${IN_POOL} OR ${inArray(orderItems.supplierId, ids)})`);
+    } else if (wantsPool) {
+      conditions.push(IN_POOL);
+    } else if (ids.length) {
+      conditions.push(inArray(orderItems.supplierId, ids));
+    }
   }
 
   const column = params.get("column") ?? "";
@@ -197,9 +256,56 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   const isKanban     = searchParams.get("kanban") === "1";
+  const isCsv        = searchParams.get("format") === "csv";
   const showDelivered = searchParams.get("showDelivered") === "1";
   const where = await buildConditions(searchParams, session, isKanban || showDelivered);
   const orderByClause = buildOrderBy(searchParams.get("sortBy") ?? "");
+
+  // The CSV export is a FORMAT of this endpoint, not an endpoint of its own.
+  //
+  // Scoping is the reason. buildConditions() is where a supplier is held to
+  // their own orders and an internal user to the suppliers they are POC of,
+  // and it is not exported from this file. A /api/orders/export route would
+  // therefore have had to restate that rule, and a second copy of a scope
+  // check is a second copy that can drift out of step with the first — which
+  // here means an export quietly handing someone orders the list refuses them.
+  // Sharing the branch makes that unrepresentable: the file contains exactly
+  // the rows the table would show, because it is the same query.
+  if (isCsv) {
+    // No pagination and no limit: an export of the first 50 rows would be a
+    // trap. Bounded in practice by the scope above.
+    const rows = await db
+      .select(EXPORT_SELECT)
+      .from(orderItems)
+      .leftJoin(suppliers, eq(orderItems.supplierId, suppliers.id))
+      .where(where)
+      .orderBy(...orderByClause);
+
+    const csv = ordersToCsv(rows, {
+      includeInternalOnly: session.user.role !== "supplier",
+    });
+
+    // Recorded like any other bulk action. One entry per export, naming the
+    // row count — this is the whole order book leaving the tool as a file, and
+    // an audit log that notes imports but not exports tells half the story.
+    await logActivity(session, {
+      action: "order.export",
+      entityType: "order",
+      entityId: null,
+      summary: `Exported ${rows.length} order${rows.length !== 1 ? "s" : ""} as CSV`,
+      details: { rows: rows.length, filters: Object.fromEntries(searchParams) },
+    });
+
+    return new NextResponse(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${exportFilename()}"`,
+        // The file is scoped to the caller. A shared cache holding one user's
+        // orders and serving them to the next would undo everything above.
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
 
   if (isKanban) {
     // Return all items (no pagination) for the kanban board
