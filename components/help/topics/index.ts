@@ -1,5 +1,6 @@
 import { ordersHelp } from "./orders";
 import { importHelp } from "./import";
+import { thoughtspotImportHelp } from "./thoughtspot-import";
 import { capacityHelp } from "./capacity";
 import { poBuilderHelp } from "./po-builder";
 import { productLibraryHelp } from "./product-library";
@@ -23,6 +24,9 @@ import { activityHelp } from "./activity";
 export const HELP_TOPICS = {
   orders: ordersHelp,
   import: importHelp,
+  // The Import tab carries two: `import` for what an upload does to your data,
+  // this one for the errand of fetching an order the sync never brought in.
+  "thoughtspot-import": thoughtspotImportHelp,
   capacity: capacityHelp,
   "po-builder": poBuilderHelp,
   "product-library": productLibraryHelp,

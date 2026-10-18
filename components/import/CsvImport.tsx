@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { toast } from "sonner";
+import { HowItWorks } from "@/components/help/HowItWorks";
 
 type ImportResult = {
   importId: number;
@@ -24,10 +25,6 @@ type ImportResult = {
  */
 const THOUGHTSPOT_ANSWER_URL =
   "https://freshprints.thoughtspot.cloud/#/saved-answer/81a81788-51ef-485a-b112-f01b9e1ebeaa";
-
-/** The how-to for the ThoughtSpot → ERP route, written for whoever is doing it. */
-const IMPORT_GUIDE_URL =
-  "https://claude.ai/code/artifact/64bf61bc-26db-4125-8623-ac8ffac7bb59";
 
 export function CsvImport({ userRole }: { userRole?: string }) {
   // Both clear paths call DELETE /api/orders, which is admin-only. Hiding them
@@ -113,14 +110,15 @@ export function CsvImport({ userRole }: { userRole?: string }) {
           >
             Use the ThoughtSpot answer ↗
           </a>
-          <a
-            href={IMPORT_GUIDE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+          {/* The how-to opens in the app, not on an external page: it has to
+              work for every internal user without anyone first being granted
+              access to a document somewhere else. Same reasoning as the rest
+              of the help panels — see HowItWorksModal. */}
+          <HowItWorks
+            topic="thoughtspot-import"
+            label="How to import from ThoughtSpot"
             className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            How to import from ThoughtSpot ↗
-          </a>
+          />
         </div>
       </div>
 
