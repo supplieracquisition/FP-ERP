@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orderItems, suppliers } from "@/lib/db/schema";
-import { IN_POOL } from "@/lib/claims";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 export async function requireAuth() {
@@ -228,57 +227,42 @@ export async function scopeSupplierIds(session: ScopeSession): Promise<number[]>
 }
 
 /**
- * Orders belonging to nobody yet: the shared intake pool every internal user
- * works out of, and what PO Builder lists to assign from.
- *
- * This used to also require `nominated_supplier_id IS NULL`, which quietly
- * made nomination act as a lock: once anyone nominated a supplier, the order
- * vanished from the pool for every internal user who was not POC of that
- * supplier. That was never the intent — nomination says who should MAKE the
- * order, not who is working it — and it was one of three different spellings
- * of "unassigned" in the codebase. All three now route through IN_POOL.
- *
- * Locking the pool is the claim's job, and a claim greys an order out rather
- * than hiding it. See lib/claims.ts.
- */
-const UNASSIGNED = IN_POOL;
-
-/**
  * The order-visibility filter for a session, as a WHERE fragment.
  *
- * undefined means "no filter" and is returned for admins ONLY. Every other
- * branch returns a real restriction, so a caller that forgets to handle
- * undefined over-filters rather than under-filters.
+ * undefined means "no filter". Every other branch returns a real restriction,
+ * so a caller that forgets to handle undefined over-filters rather than
+ * under-filters.
  *
- * Fails closed at both degenerate points:
- *  - a supplier account with no supplier_id matches nothing (1 = 0)
- *  - an internal user who is POC of no suppliers gets the unassigned pool
- *    alone, never an unfiltered result. Being POC of nothing narrows what you
- *    see; it can never widen it.
+ * THE INTERNAL TEAM SEES EVERY ORDER. Admin and ordinary internal users are
+ * the same thing here, deliberately — this is the one line that decides it.
  *
- * One thing DID widen when UNASSIGNED became IN_POOL: an unassigned order that
- * someone has nominated a supplier for is now visible to every internal user,
- * where before only that supplier's POC could see it. That is the point — the
- * pool is shared, and you cannot claim what you cannot see. Supplier scoping is
- * untouched by that change: a supplier's filter never mentions the pool.
+ * It used to be POC-scoped: an internal user saw orders for the suppliers they
+ * were POC of, plus the unassigned pool, and nothing else. That was removed on
+ * request (2026-10-18). The team is small, everyone covers for everyone, and
+ * the scoping mostly produced orders that existed but could not be found by
+ * the person looking for them — including, routinely, an order somebody had
+ * just imported themselves.
+ *
+ * What that costs, stated plainly so it is a choice and not a surprise: there
+ * is no longer any per-order boundary between internal users. Anyone internal
+ * can read, edit, claim and process any order in the tool. poc_user_id still
+ * records who HANDLES a supplier and still drives the account views; it just
+ * no longer limits what anyone can see.
+ *
+ * Supplier scoping is untouched and still fails closed: a supplier sees their
+ * own orders, and a supplier account with no supplier_id matches nothing.
+ * To put the team boundary back, restore the pocIds branch here and the
+ * matching one in denyOrderAccess below — they must change together.
  */
 export async function orderScope(session: ScopeSession): Promise<SQL | undefined> {
-  if (session.user.role === "admin") return undefined;
-
   if (session.user.role === "supplier") {
     return session.user.supplierId
       ? eq(orderItems.supplierId, Number(session.user.supplierId))
       : sql`1 = 0`;
   }
 
-  const pocIds = await scopeSupplierIds(session);
-  if (pocIds.length === 0) return UNASSIGNED;
-
-  return sql`(
-    ${inArray(orderItems.supplierId, pocIds)}
-    OR ${inArray(orderItems.nominatedSupplierId, pocIds)}
-    OR ${UNASSIGNED}
-  )`;
+  // Admin and internal alike.
+  return undefined;
 }
 
 /**
@@ -315,8 +299,6 @@ export async function denyOrderAccess(
 
   const forbidden = NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  if (session.user.role === "admin") return null;
-
   if (session.user.role === "supplier") {
     const ownsIt =
       Boolean(session.user.supplierId) &&
@@ -324,18 +306,9 @@ export async function denyOrderAccess(
     return ownsIt ? null : forbidden;
   }
 
-  // Internal. Anything in the pool is everyone's, so check it before the POC
-  // lookup — an internal user who is POC of nothing still works the intake
-  // pool. This line is the row-level twin of IN_POOL and must keep matching it:
-  // it deliberately ignores nomination, exactly as the list query now does.
-  if (order.supplierId === null) return null;
-
-  const pocIds = await scopeSupplierIds(session);
-  const inScope =
-    (order.supplierId !== null && pocIds.includes(order.supplierId)) ||
-    (order.nominatedSupplierId !== null && pocIds.includes(order.nominatedSupplierId));
-
-  return inScope ? null : forbidden;
+  // Internal, admin or not: every order is reachable. The row-level twin of
+  // orderScope() returning undefined above — keep the two in step.
+  return null;
 }
 
 /**

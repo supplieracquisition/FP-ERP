@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { format, differenceInCalendarDays } from "date-fns";
 import { calendarDate, calendarDateOrNull } from "@/lib/calendar-date";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 
 type Supplier = { id: number; name: string };
 type OrderItem = {
@@ -93,7 +94,12 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
 
   const [search, setSearch]             = useState("");
   const [columnFilter, setColumnFilter] = useState("");
-  const [supplierFilter, setSupplierFilter] = useState(searchParams.get("supplierId") ?? "");
+  // An array now, not a string: the manufacturer filter takes several at
+  // once. Still read from the URL as one comma-separated value so a filtered
+  // view stays linkable.
+  const [supplierFilter, setSupplierFilter] = useState<string[]>(
+    (searchParams.get("supplierId") ?? "").split(",").filter(Boolean)
+  );
   const [styleFilter, setStyleFilter]   = useState("");
   const [colorFilter, setColorFilter]   = useState("");
   const [printTypeFilter, setPrintTypeFilter] = useState("");
@@ -106,6 +112,7 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
   // has to be mapped back through row indexes, which shift under re-sorts.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const isAdmin    = userRole === "admin";
   const isSupplier = userRole === "supplier";
@@ -114,12 +121,16 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
   const canSelect  = isAdmin;
   const orderDetailBase = isSupplier ? "/supplier/orders" : "/orders";
 
+  // A fresh array identity every render would restart the fetch effect on
+  // every render. The joined string is the thing that actually changed.
+  const supplierKey = supplierFilter.join(",");
+
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     if (search)          params.set("search", search);
     if (columnFilter)    params.set("column", columnFilter);
-    if (supplierFilter)  params.set("supplierId", supplierFilter);
+    if (supplierFilter.length) params.set("supplierId", supplierFilter.join(","));
     if (styleFilter)     params.set("styleCode", styleFilter);
     if (colorFilter)     params.set("color", colorFilter);
     if (printTypeFilter) params.set("printType", printTypeFilter);
@@ -139,7 +150,7 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
     // which is the one thing a destructive bulk action must never do.
     setSelected(new Set());
     setLoading(false);
-  }, [search, columnFilter, supplierFilter, styleFilter, colorFilter, printTypeFilter, decorationFilter, shipDateFilter, sortBy, showDelivered, page]);
+  }, [search, columnFilter, supplierKey, styleFilter, colorFilter, printTypeFilter, decorationFilter, shipDateFilter, sortBy, showDelivered, page]);
 
   useEffect(() => {
     const t = setTimeout(fetchOrders, 200);
@@ -147,6 +158,53 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
   }, [fetchOrders]);
 
   const resetPage = () => setPage(1);
+
+  /**
+   * Export what is currently on screen, not page 1 of it.
+   *
+   * Built from the same filters as fetchOrders and deliberately WITHOUT
+   * `page`: the server drops pagination for format=csv, so the file holds
+   * every row matching the current filters rather than the fifty being looked
+   * at. Filters are kept, though — someone who has narrowed to one
+   * manufacturer and then presses Export means that manufacturer.
+   */
+  async function exportCsv() {
+    setExporting(true);
+    const params = new URLSearchParams();
+    if (search)          params.set("search", search);
+    if (columnFilter)    params.set("column", columnFilter);
+    if (supplierFilter.length) params.set("supplierId", supplierFilter.join(","));
+    if (styleFilter)     params.set("styleCode", styleFilter);
+    if (colorFilter)     params.set("color", colorFilter);
+    if (printTypeFilter) params.set("printType", printTypeFilter);
+    if (decorationFilter) params.set("decoration", decorationFilter);
+    if (shipDateFilter)  params.set("shipDate", shipDateFilter);
+    if (sortBy)          params.set("sortBy", sortBy);
+    if (showDelivered)   params.set("showDelivered", "1");
+    params.set("format", "csv");
+
+    try {
+      const res = await fetch(`/api/orders?${params}`);
+      if (!res.ok) {
+        toast.error("Export failed");
+        return;
+      }
+      // Downloaded through a blob rather than by pointing the browser at the
+      // URL: this is an authenticated fetch, and it lets a failure surface as
+      // a toast instead of navigating the tab to an error body.
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download =
+        res.headers.get("Content-Disposition")?.match(/filename="(.+?)"/)?.[1] ??
+        "orders.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const isOverdue = (item: OrderItem) => {
     if (!item.dueDate) return false;
@@ -164,7 +222,7 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
 
   const totalPages = Math.ceil(total / 50);
 
-  const activeFilterCount = [columnFilter, supplierFilter, styleFilter, colorFilter, printTypeFilter, decorationFilter, shipDateFilter, sortBy, showDelivered ? "1" : ""].filter(Boolean).length;
+  const activeFilterCount = [columnFilter, supplierFilter.length ? "1" : "", styleFilter, colorFilter, printTypeFilter, decorationFilter, shipDateFilter, sortBy, showDelivered ? "1" : ""].filter(Boolean).length;
 
   const selectCls = (active: boolean) =>
     `rounded-md border px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-gray-700 bg-white transition-colors ${
@@ -233,7 +291,7 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
   }
 
   function clearAll() {
-    setSearch(""); setColumnFilter(""); setSupplierFilter("");
+    setSearch(""); setColumnFilter(""); setSupplierFilter([]);
     setStyleFilter(""); setColorFilter(""); setPrintTypeFilter("");
     setDecorationFilter(""); setShipDateFilter(""); setSortBy("");
     setShowDelivered(false); setPage(1);
@@ -272,6 +330,13 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
             {showDelivered ? "Hide Delivered" : "Show Delivered"}
           </button>
 
+          {/* Exports every row the current filters match, not just this page.
+              Disabled at zero so it cannot produce a headings-only file. */}
+          <button onClick={exportCsv} disabled={exporting || total === 0}
+            className="text-xs rounded-md border border-gray-300 px-3 py-1.5 font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors">
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+
           <span className="ml-auto text-xs text-gray-400">
             {loading ? "Loading…" : `${total} order${total !== 1 ? "s" : ""}`}
           </span>
@@ -280,11 +345,19 @@ export function OrdersTable({ suppliers, userRole }: { suppliers: Supplier[]; us
         {/* Row 2: field filters */}
         <div className="flex items-center gap-2 flex-wrap">
           {!isSupplier && (
-            <select value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); resetPage(); }}
-              className={selectCls(!!supplierFilter)}>
-              <option value="">Manufacturer: All</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <MultiSelect
+              label="Manufacturer"
+              value={supplierFilter}
+              onChange={(next) => { setSupplierFilter(next); resetPage(); }}
+              options={[
+                // "0" is the pool, matching the API: it means supplier_id IS
+                // NULL, not a supplier whose id is zero. Offered alongside the
+                // real manufacturers so "unassigned plus these two" is one
+                // filter rather than two incompatible ones.
+                { value: "0", label: "Unassigned (pool)" },
+                ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
+              ]}
+            />
           )}
 
           <select value={columnFilter} onChange={(e) => { setColumnFilter(e.target.value); resetPage(); }}

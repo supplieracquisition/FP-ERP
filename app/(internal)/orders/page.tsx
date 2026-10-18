@@ -1,4 +1,6 @@
-import { requireInternal, scopeSupplierIds } from "@/lib/permissions";
+
+
+import { requireInternal } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { suppliers, users } from "@/lib/db/schema";
 import { asc, eq, ne } from "drizzle-orm";
@@ -34,15 +36,14 @@ export default async function OrdersPage({
     .where(eq(suppliers.active, true))
     .orderBy(asc(suppliers.name));
 
-  // filterSuppliers stays scoped. Both views filter on order_items.supplier_id
-  // — orders already ASSIGNED — and an internal user only ever sees those for
-  // suppliers they are POC of, so any other entry here is a dropdown option
-  // that always returns nothing. Cosmetic only: /api/orders enforces the real
-  // scope, and this list is not what makes that safe.
-  const pocIds = session.user.role === "admin" ? null : await scopeSupplierIds(session);
-  const filterSuppliers = pocIds
-    ? activeSuppliers.filter((s) => pocIds.includes(s.id))
-    : activeSuppliers;
+  // The manufacturer filter lists every active supplier, for everyone.
+  //
+  // It used to be narrowed to the user's POC'd suppliers, on the reasoning
+  // that an internal user could not see anyone else's orders anyway, so a
+  // wider dropdown would only offer options that returned nothing. That
+  // reasoning expired when internal order scoping was removed (see
+  // orderScope): every entry here now returns real rows.
+  const filterSuppliers = activeSuppliers;
 
   // Who holds a claim, by id. /api/orders returns processor_user_id but not the
   // name — a second join onto users needs drizzle's alias(), which is imported

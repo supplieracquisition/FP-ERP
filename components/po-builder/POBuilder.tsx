@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { HowItWorks } from "@/components/help/HowItWorks";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Supplier = {
   id: number;
@@ -1087,18 +1088,13 @@ export function POBuilder() {
                 <div>
                   <label className="text-xs text-gray-500 font-medium">Fabric Code</label>
                   {li.availableFabricCodes.length > 0 ? (
-                    <select
+                    <SearchableSelect
                       value={li.selectedFabricCode}
-                      onChange={(e) => selectFabric(li.orderItem.id, e.target.value)}
-                      className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
-                    >
-                      <option value="">Select a fabric...</option>
-                      {li.availableFabricCodes.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(code) => selectFabric(li.orderItem.id, code)}
+                      placeholder="Select a fabric..."
+                      emptyText="No fabric code matches"
+                      options={li.availableFabricCodes.map((code) => ({ value: code, label: code }))}
+                    />
                   ) : (
                     <div className="mt-1 text-xs text-gray-500 bg-gray-50 p-2 rounded">
                       No fabrics found for this style. Use the swatch code field below to enter manually.
@@ -1160,18 +1156,16 @@ export function POBuilder() {
                       className="mt-1 w-full text-xs border border-blue-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-600 bg-blue-50"
                     />
                   ) : li.selectedFabricCode && li.fabricColorOptions.length > 0 ? (
-                    <select
+                    <SearchableSelect
                       value={li.fabricColorCode}
-                      onChange={(e) => updateLineItem(li.orderItem.id, { fabricColorCode: e.target.value })}
-                      className="mt-1 w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-gray-700 bg-white"
-                    >
-                      <option value="">Select a color...</option>
-                      {li.fabricColorOptions.map((color, idx) => (
-                        <option key={idx} value={color.colorCode}>
-                          {color.colorCode}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(colorCode) => updateLineItem(li.orderItem.id, { fabricColorCode: colorCode })}
+                      placeholder="Select a color..."
+                      emptyText="No color code matches"
+                      options={li.fabricColorOptions.map((color) => ({
+                        value: color.colorCode,
+                        label: color.colorCode,
+                      }))}
+                    />
                   ) : li.selectedFabricCode ? (
                     <div className="mt-1 text-xs text-gray-500 bg-gray-50 p-2 rounded">
                       Loading colors for {li.selectedFabricCode}...
