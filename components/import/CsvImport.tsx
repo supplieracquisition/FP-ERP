@@ -14,6 +14,21 @@ type ImportResult = {
   ignoredHeaders?: string[];
 };
 
+/**
+ * The saved ThoughtSpot answer every manual import is pulled from.
+ *
+ * Deliberately the bare canonical link, not the one that arrives in a
+ * pinboard-sharing email — those carry utm_source/utm_medium params for an
+ * individual's email and a stray trailing slash, neither of which belongs in a
+ * link shipped to every internal user.
+ */
+const THOUGHTSPOT_ANSWER_URL =
+  "https://freshprints.thoughtspot.cloud/#/saved-answer/81a81788-51ef-485a-b112-f01b9e1ebeaa";
+
+/** The how-to for the ThoughtSpot → ERP route, written for whoever is doing it. */
+const IMPORT_GUIDE_URL =
+  "https://claude.ai/code/artifact/64bf61bc-26db-4125-8623-ac8ffac7bb59";
+
 export function CsvImport({ userRole }: { userRole?: string }) {
   // Both clear paths call DELETE /api/orders, which is admin-only. Hiding them
   // for everyone else beats showing a control that 403s — the "clear first"
@@ -79,6 +94,36 @@ export function CsvImport({ userRole }: { userRole?: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Where a manual import starts.
+          Above the drop zone on purpose: by the time you have a file in hand
+          you are past needing either of these. Both open in a new tab so a
+          half-finished import is never navigated away from. */}
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-gray-800">Order missing from the tool?</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Some orders never reach the ERP automatically. Pull them from the ThoughtSpot answer
+          and import the CSV here.
+        </p>
+        <div className="flex flex-wrap gap-3 mt-3">
+          <a
+            href={THOUGHTSPOT_ANSWER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-gray-900 px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-900 hover:text-white transition-colors"
+          >
+            Use the ThoughtSpot answer ↗
+          </a>
+          <a
+            href={IMPORT_GUIDE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            How to import from ThoughtSpot ↗
+          </a>
+        </div>
+      </div>
+
       {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
