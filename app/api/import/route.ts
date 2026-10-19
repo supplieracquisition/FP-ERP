@@ -1,38 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { csvImports, csvImportErrors, suppliers, apiKeys, users } from "@/lib/db/schema";
+import { csvImports, csvImportErrors, suppliers, users } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
-import { ensureApiKeysTable } from "@/lib/db/ensure-tables";
+import { verifyApiKeyFromRequest } from "@/lib/apiKey";
 import Papa from "papaparse";
-import crypto from "crypto";
 import { importOrderRows } from "@/lib/import-rows";
 import { logActivity, SYSTEM_ACTOR } from "@/lib/activity";
 
-async function verifyApiKey(keyString: string): Promise<boolean> {
-  try {
-    await ensureApiKeysTable();
-    const hashedKey = crypto.createHash("sha256").update(keyString).digest("hex");
-    const [key] = await db
-      .select()
-      .from(apiKeys)
-      .where(eq(apiKeys.key, hashedKey))
-      .limit(1);
-    return !!key;
-  } catch (error) {
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
-  // Allow either cookie-based auth or API key auth
+  // Allow either cookie-based auth or API key auth.
+  //
+  // The key check is lib/apiKey.ts, not a copy of it. The copy that used to
+  // live here hashed the header untrimmed, so a key carrying one trailing
+  // newline from an integration's header config read as invalid — while the
+  // same key worked against /api/n8n/import, which already used the shared
+  // verifier.
   let userId: number | null = null;
   const authHeader = request.headers.get("authorization");
 
   if (authHeader?.startsWith("Bearer ")) {
-    const keyString = authHeader.slice(7);
-    const isValid = await verifyApiKey(keyString);
-    if (isValid) {
+    // ensureApiKeysTable() used to run inside the local verifier. Dropped with
+    // it: the table exists in production (the n8n import authenticates against
+    // it hourly), and a credential check is the wrong place to be issuing DDL.
+    if (await verifyApiKeyFromRequest(request)) {
       // For API key auth, use a system user (admin)
       const [adminUser] = await db
         .select({ id: users.id })
