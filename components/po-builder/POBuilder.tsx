@@ -5,6 +5,20 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { HowItWorks } from "@/components/help/HowItWorks";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { calendarDateOrNull } from "@/lib/calendar-date";
+
+/**
+ * A date as STORED on an order, shown as the day it was stored.
+ *
+ * The date inputs on this page hold a bare "YYYY-MM-DD" and are safe to format
+ * directly, but a value read back off an order is an instant pinned to UTC
+ * midnight. toLocaleDateString() reads local fields, so west of UTC the v3 due
+ * date rendered as the day before the one the order actually carries.
+ */
+function fmtStoredDate(value: string | null | undefined): string {
+  const d = calendarDateOrNull(value);
+  return d ? format(d, "MMM d, yyyy") : "—";
+}
 
 type Supplier = {
   id: number;
@@ -109,12 +123,10 @@ function generateCSV(
   supplier: Supplier | null,
   lineItems: LineItem[]
 ): string {
+  // calendarDate(), not new Date(): see lib/calendar-date.ts.
   const fmtDate = (d: string) => {
-    if (!d) return "";
-    try {
-      const [year, month, day] = d.split('-').map(Number);
-      return format(new Date(year, month - 1, day), "M/d/yyyy");
-    } catch { return d; }
+    const c = calendarDateOrNull(d);
+    return c ? format(c, "M/d/yyyy") : "";
   };
 
   const lines: string[] = [];
@@ -272,11 +284,8 @@ function POSummaryModal({
   isLoading,
 }: POSummaryModalProps) {
   const fmtDate = (d: string) => {
-    if (!d) return "—";
-    try {
-      const [year, month, day] = d.split('-').map(Number);
-      return format(new Date(year, month - 1, day), "MMM d, yyyy");
-    } catch { return d; }
+    const c = calendarDateOrNull(d);
+    return c ? format(c, "MMM d, yyyy") : "—";
   };
 
   return (
@@ -934,7 +943,7 @@ export function POBuilder() {
             {orderDueDate && lineItems.length > 0 && (
               <div className="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded">
                 <div>
-                  <span className="font-medium">Due Date on v3:</span> {new Date(orderDueDate).toLocaleDateString()}
+                  <span className="font-medium">Due Date on v3:</span> {fmtStoredDate(orderDueDate)}
                 </div>
                 {lineItems[0]?.orderItem.orderId && (
                   <a href={`https://v3.freshprints.com/dashboard/order/${lineItems[0].orderItem.orderId}`} target="_blank" rel="noopener noreferrer"
