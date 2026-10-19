@@ -96,6 +96,11 @@ function SuppliersHelp() {
           A factory can have <B>more than one</B> login — sampling and production, say — so inviting
           a second address adds to the record rather than replacing anyone.
         </P>
+        <P>
+          Invite links expire. If they never got the email, or clicked it too late,{" "}
+          <B>Resend invite</B> beside their login sends a fresh one — you do not need to delete
+          the login and start again. Resending is admin-only.
+        </P>
       </Section>
 
       <Section title="Deactivating">

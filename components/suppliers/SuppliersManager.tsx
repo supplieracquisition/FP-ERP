@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { HowItWorks } from "@/components/help/HowItWorks";
+import { usePasswordLink, ManualLinkNotice } from "@/components/users/PasswordLink";
 
 type SupplierUser = { id: number; name: string; email: string };
 type InternalUser = { id: number; name: string };
@@ -166,6 +167,52 @@ function AddUserForm({ supplierId, hasLogins, onSaved }: {
   );
 }
 
+/**
+ * One portal login, with the option to send its invite again.
+ *
+ * The gap this closes: a factory that never clicked its invite, or clicked it
+ * after the link expired, could not be helped from here at all. The invite goes
+ * out once when the login is created and there was nothing on this page that
+ * sent a second one — re-inviting the same address is refused ("already
+ * registered"), so the only workaround was deleting the login in Supabase and
+ * starting over.
+ *
+ * Its own component, not a branch inside the list: usePasswordLink holds the
+ * per-login sending and rate-limit state, and a hook cannot be called inside a
+ * map.
+ *
+ * Admin-only, matching PATCH /api/users/[id]. An internal user would get a 403,
+ * so offering them the button would only promise something it cannot do.
+ */
+function SupplierLoginRow({ user, canResend }: { user: SupplierUser; canResend: boolean }) {
+  const { send, sending, manualLink } = usePasswordLink(user, {
+    confirmText: `Email ${user.name} (${user.email}) a fresh link to set their password?`,
+    sentText: (email) => `Invite resent to ${email}`,
+  });
+
+  return (
+    <li className="text-xs text-gray-700">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 truncate">
+          <span className="font-medium">{user.name}</span>{" "}
+          <span className="text-gray-400">({user.email})</span>
+        </span>
+        {canResend && (
+          <button
+            onClick={send}
+            disabled={sending}
+            title="Sends them a new link to set their password"
+            className="shrink-0 text-blue-600 hover:text-blue-800 disabled:opacity-50"
+          >
+            {sending ? "Sending…" : "Resend invite"}
+          </button>
+        )}
+      </div>
+      {manualLink && <ManualLinkNotice link={manualLink} name={user.name} />}
+    </li>
+  );
+}
+
 function InlineNumber({ label, value, onSave }: {
   label: string;
   value: number | null;
@@ -245,11 +292,12 @@ function FormNumber({ label, value, onChange }: {
   );
 }
 
-function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
+function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc, canResendInvite }: {
   supplier: Supplier;
   onRefresh: () => void;
   internalUsers: InternalUser[];
   canReassignPoc: boolean;
+  canResendInvite: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(supplier.name);
@@ -551,10 +599,7 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
         ) : (
           <ul className="space-y-1">
             {supplier.users.map((u) => (
-              <li key={u.id} className="text-xs text-gray-700">
-                <span className="font-medium">{u.name}</span>{" "}
-                <span className="text-gray-400">({u.email})</span>
-              </li>
+              <SupplierLoginRow key={u.id} user={u} canResend={canResendInvite} />
             ))}
           </ul>
         )}
@@ -760,11 +805,11 @@ export function SuppliersManager({ userRole }: { userRole: string }) {
         <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
       ) : (
         <div className="space-y-3">
-          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
+          {active.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} canResendInvite={isAdmin} />)}
           {inactive.length > 0 && (
             <>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 pt-2">Inactive</p>
-              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} />)}
+              {inactive.map((s) => <SupplierRow key={s.id} supplier={s} onRefresh={load} internalUsers={internalUsers} canReassignPoc={isAdmin} canResendInvite={isAdmin} />)}
             </>
           )}
           {suppliers.length === 0 && (
