@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { requireInternal } from "@/lib/permissions";
+import { calendarDateOrNull } from "@/lib/calendar-date";
 
 type Sizes = { xs: string; s: string; m: string; l: string; xl: string; xxl: string; xxxl: string };
 
@@ -39,15 +40,25 @@ function lineTotal(item: LineItem): number {
   return SIZE_KEYS.reduce((sum, k) => sum + cell(item, k), 0);
 }
 
+/**
+ * A stored calendar date -> "October 7, 2026".
+ *
+ * Through calendarDate(), not new Date(). These are calendar days pinned to
+ * UTC midnight, and reading getMonth()/getDate() off that instant uses LOCAL
+ * fields: anywhere west of UTC, "2026-10-07T00:00:00.000Z" is the evening of
+ * the 6th, and the PO printed the day before the one the builder chose. Both
+ * the PO date and the in-hands date went out wrong — a date a factory plans
+ * against. Exactly the bug lib/calendar-date.ts was written for.
+ *
+ * It did not show up in production only because that runs in syd1, which is
+ * ahead of UTC rather than behind it. A region change would have started
+ * mis-dating every PO with nothing else altered.
+ */
 function formatDate(dateStr: string): string {
-  if (!dateStr) return "";
-  try {
-    const date = new Date(dateStr);
-    const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-  } catch {
-    return dateStr;
-  }
+  const date = calendarDateOrNull(dateStr);
+  if (!date) return "";
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
 function generateLineItemRows(lineItems: LineItem[]): string {
@@ -60,16 +71,32 @@ function generateLineItemRows(lineItems: LineItem[]): string {
       const [xs, s, m, l, xl, xxl, xxxl] = SIZE_KEYS.map((k) => cell(item, k));
       const total = lineTotal(item);
 
-      const itemName = item.orderName || (item.styleCode || item.fabricSwatchCode || "");
+      const itemName = item.orderName || item.fabricSwatchCode || "";
+
+      // One value per column, matching the header row in po-template.html.
+      //
+      // These had drifted apart. The row emitted six cells before the sizes —
+      // #, item id, description, fabric, PRINT TYPE, decorating methods —
+      // against headers reading #, Item ID, Description, Fabric, COLORWAY,
+      // Print / Decoration. So print type was printed to the factory under a
+      // heading that says Colorway, while the actual colourway was appended to
+      // the description and the Colorway column sat empty on every PO.
+      //
+      // Print type and decorating methods now share the one column whose
+      // heading names them both, which frees Colorway for the colour code.
+      const printDetail = [item.printType, item.decoratingMethods]
+        .filter(Boolean)
+        .join(" · ");
 
       return `
       <tr>
         <td class="sno">${i + 1}</td>
         <td class="itemid">${item.orderItemId}</td>
-        <td class="desc">${itemName}${item.fabricColorCode ? ` — ${item.fabricColorCode}` : ""}</td>
+        <td class="detail">${item.styleCode || ""}</td>
+        <td class="desc">${itemName}</td>
         <td class="detail">${item.fabricSwatchCode || ""}</td>
-        <td class="detail">${item.printType || ""}</td>
-        <td class="detail">${item.decoratingMethods || ""}</td>
+        <td class="detail">${item.fabricColorCode || ""}</td>
+        <td class="detail">${printDetail}</td>
         <td class="num">${xs || ""}</td>
         <td class="num">${s || ""}</td>
         <td class="num">${m || ""}</td>

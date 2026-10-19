@@ -37,7 +37,23 @@ export async function GET() {
       ...s,
       orderCount: countsMap.get(s.id) ?? 0,
       users: usersMap.get(s.id) ?? [],
-      pocName: s.pocUserId ? (pocMap.get(s.pocUserId) ?? null) : null,
+      // The internal handler's display name, under its OWN key.
+      //
+      // This used to be returned as `pocName`, which is a real column holding
+      // something else entirely: the contact person AT THE FACTORY, labelled
+      // "Contact name" in lib/supplierEditable.ts and printed as the Attn line
+      // on every purchase order.
+      //
+      // Overwriting it here was not merely cosmetic. The supplier edit form
+      // seeds its fields from this response and PATCHes them straight back, so
+      // saving a supplier — for any reason, even to fix its address — wrote
+      // the Fresh Prints handler's name into suppliers.poc_name and destroyed
+      // the factory contact. The next PO built for that supplier then went out
+      // addressed "Attn: <a Fresh Prints employee>".
+      //
+      // The handler already has its own control on that screen, the "POC
+      // Assigned" dropdown bound to pocUserId, so nothing needed this alias.
+      pocUserName: s.pocUserId ? (pocMap.get(s.pocUserId) ?? null) : null,
     })),
     internalUsers,
   });
