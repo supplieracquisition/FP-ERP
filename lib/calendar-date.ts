@@ -26,9 +26,31 @@
  * calendarDate() to show one to a person. Neither is safe for the other's job.
  */
 
-/** A stored date string -> that same calendar day at LOCAL midnight. */
+import { toIsoTimestamp } from "./import-mapping";
+
+/**
+ * A stored date string -> that same calendar day at LOCAL midnight.
+ *
+ * Normalised through toIsoTimestamp() first, because not every stored value is
+ * ISO. Rows imported before the importer began normalising its date columns
+ * still hold the sheet's own spelling — "07/29/2026 0:00:00" — and slicing ten
+ * characters off that gives "07/29/202", which is not a date at all. The whole
+ * function then returned Invalid Date, and every caller renders that as an em
+ * dash, so those orders displayed NO due date rather than a wrong one. 20 of
+ * 120 rows locally.
+ *
+ * toIsoTimestamp() is the importer's parser and already accepts all three
+ * shapes these columns contain. Reused rather than reimplemented: a second
+ * date parser that disagrees with the first about what "08/09/2026" means is a
+ * worse bug than the one being fixed here.
+ *
+ * Anything it cannot parse falls through unchanged and still yields Invalid
+ * Date, so a genuinely corrupt value keeps failing visibly instead of being
+ * guessed at.
+ */
 export function calendarDate(value: string): Date {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  const iso = toIsoTimestamp(value) ?? value;
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
   return new Date(year, month - 1, day);
 }
 
