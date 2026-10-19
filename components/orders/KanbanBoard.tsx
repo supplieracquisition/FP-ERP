@@ -19,6 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { format, differenceInCalendarDays } from "date-fns";
 import { calendarDate, calendarDateOrNull } from "@/lib/calendar-date";
 import { toast } from "sonner";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 
 type Supplier = { id: number; name: string };
 type TeamMember = { id: number; name: string };
@@ -609,7 +610,12 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
   const searchParams = useSearchParams();
   const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [supplierFilter, setSupplierFilter] = useState(searchParams.get("supplierId") ?? "");
+  // An array, matching the table view: the manufacturer filter takes several at
+  // once. Still read from the URL as one comma-separated value, so a link made
+  // in either view opens filtered the same way in the other.
+  const [supplierFilter, setSupplierFilter] = useState<string[]>(
+    (searchParams.get("supplierId") ?? "").split(",").filter(Boolean)
+  );
   const [styleFilter, setStyleFilter] = useState("");
   const [colorFilter, setColorFilter] = useState("");
   const [decorationFilter, setDecorationFilter] = useState("");
@@ -631,12 +637,19 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
   const inFlight = useRef(false);
   const busy = useRef(false);
 
+  // A fresh array identity would restart the fetch effect — and with it the
+  // poll — on every render. The joined string is the thing that actually
+  // changed.
+  const supplierKey = supplierFilter.join(",");
+
   const fetchOrders = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
       const params = new URLSearchParams({ kanban: "1" });
-      if (supplierFilter) params.set("supplierId", supplierFilter);
+      // One comma-separated value, which /api/orders already splits — "0" in it
+      // means the unassigned pool, not a supplier with id zero.
+      if (supplierFilter.length) params.set("supplierId", supplierFilter.join(","));
       const res = await fetch(`/api/orders?${params}`);
       if (!res.ok) return;
       const data = await res.json();
@@ -645,7 +658,7 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
     } finally {
       inFlight.current = false;
     }
-  }, [supplierFilter]);
+  }, [supplierKey]);
 
   useEffect(() => { setLoading(true); fetchOrders(); }, [fetchOrders]);
 
@@ -816,7 +829,7 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
   );
 
   const exactMatch = q ? items.find((i) => i.orderItemId.toLowerCase() === q) : null;
-  const activeFilterCount = [styleFilter, colorFilter, decorationFilter, printTypeFilter, supplierFilter, shipDateFilter].filter(Boolean).length;
+  const activeFilterCount = [styleFilter, colorFilter, decorationFilter, printTypeFilter, supplierFilter.length ? "1" : "", shipDateFilter].filter(Boolean).length;
 
   const filterSelect = (label: string, value: string, onChange: (v: string) => void, options: { value: string; label: string }[]) => (
     <select key={label} value={value} onChange={(e) => onChange(e.target.value)}
@@ -876,8 +889,22 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
 
         {/* Row 2: filter dropdowns */}
         <div className="flex items-center gap-2 flex-wrap">
-          {!isSupplier && filterSelect("Manufacturer", supplierFilter, setSupplierFilter,
-            suppliers.map((s) => ({ value: String(s.id), label: s.name })))}
+          {!isSupplier && (
+            <MultiSelect
+              label="Manufacturer"
+              value={supplierFilter}
+              onChange={setSupplierFilter}
+              options={[
+                // "0" is the pool, matching the API: supplier_id IS NULL, not a
+                // supplier whose id is zero. Offered alongside the real
+                // manufacturers so "the pool plus these two" is one filter — on
+                // the board that is the difference between keeping the
+                // Unassigned column and emptying it.
+                { value: "0", label: "Unassigned (pool)" },
+                ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
+              ]}
+            />
+          )}
           {filterSelect("Style Code", styleFilter, setStyleFilter, styleOptions.map((s) => ({ value: s, label: s })))}
           {filterSelect("Color", colorFilter, setColorFilter, colorOptions.map((s) => ({ value: s, label: s })))}
           {filterSelect("Print Type", printTypeFilter, setPrintTypeFilter, printTypeOptions.map((s) => ({ value: s, label: s })))}
@@ -889,7 +916,7 @@ export function KanbanBoard({ suppliers, nominateSuppliers = [], userRole, userI
             { value: "14",   label: "Within 14 Days" },
           ])}
           {(activeFilterCount > 0 || search) && (
-            <button onClick={() => { setSearch(""); setSupplierFilter(""); setStyleFilter(""); setColorFilter(""); setDecorationFilter(""); setPrintTypeFilter(""); setShipDateFilter(""); }}
+            <button onClick={() => { setSearch(""); setSupplierFilter([]); setStyleFilter(""); setColorFilter(""); setDecorationFilter(""); setPrintTypeFilter(""); setShipDateFilter(""); }}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:border-gray-400 transition-colors">
               Clear filters
             </button>
