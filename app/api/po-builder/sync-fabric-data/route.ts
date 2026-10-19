@@ -4,13 +4,12 @@ import {
   fabricDetails,
   fabricColors,
   fpeSuppliers,
-  apiKeys,
 } from "@/lib/db/schema";
 import { parseMTOTemplateFromContent } from "@/lib/csv/mtoParser";
 import { parseFPEDatabaseFromContent } from "@/lib/csv/fpeParser";
-import { count, eq } from "drizzle-orm";
+import { count } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
-import crypto from "crypto";
+import { verifyApiKeyFromRequest } from "@/lib/apiKey";
 
 /**
  * The floor that applies when the table being replaced is EMPTY.
@@ -85,38 +84,21 @@ interface SyncSummary {
   };
 }
 
-async function verifyApiKey(keyString: string): Promise<boolean> {
-  try {
-    const hashedKey = crypto.createHash("sha256").update(keyString).digest("hex");
-    const [key] = await db
-      .select()
-      .from(apiKeys)
-      .where(eq(apiKeys.key, hashedKey))
-      .limit(1);
-
-    if (!key) return false;
-
-    // Log usage by updating lastUsedAt
-    await db
-      .update(apiKeys)
-      .set({ lastUsedAt: new Date().toISOString() })
-      .where(eq(apiKeys.id, key.id));
-
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
-  // Allow either API key auth or session auth
+  // Allow either API key auth or session auth.
+  //
+  // The key check is lib/apiKey.ts, not a copy of it. The copy that used to
+  // live here hashed `authHeader.slice(7)` untrimmed, so a key carrying one
+  // trailing newline from an integration's header config hashed to something
+  // else and came back 401 — while the SAME key authenticated fine against
+  // /api/n8n/import, which already used the shared verifier. Two routes
+  // disagreeing about whether a credential is valid is not a difference worth
+  // preserving.
   let isApiKeyAuth = false;
   const authHeader = request.headers.get("authorization");
 
   if (authHeader?.startsWith("Bearer ")) {
-    const keyString = authHeader.slice(7);
-    const isValid = await verifyApiKey(keyString);
-    if (!isValid) {
+    if (!(await verifyApiKeyFromRequest(request))) {
       return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
     }
     isApiKeyAuth = true;

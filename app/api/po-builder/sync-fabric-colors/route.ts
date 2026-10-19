@@ -1,32 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { pobFabricColors, apiKeys } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import crypto from "crypto";
-
-async function verifyApiKey(keyString: string): Promise<boolean> {
-  try {
-    const hashedKey = crypto.createHash("sha256").update(keyString).digest("hex");
-    const [key] = await db
-      .select()
-      .from(apiKeys)
-      .where(eq(apiKeys.key, hashedKey))
-      .limit(1);
-    return !!key;
-  } catch (error) {
-    return false;
-  }
-}
+import { pobFabricColors } from "@/lib/db/schema";
+import { verifyApiKeyFromRequest } from "@/lib/apiKey";
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json({ ok: false, message: "Missing API key" }, { status: 401 });
-  }
-
-  const keyString = authHeader.slice(7);
-  const isValid = await verifyApiKey(keyString);
-  if (!isValid) {
+  // Shared verifier, not a local copy: it trims the key, which a hand-copied
+  // one did not. See lib/apiKey.ts.
+  if (!(await verifyApiKeyFromRequest(request))) {
     return NextResponse.json({ ok: false, message: "Invalid API key" }, { status: 401 });
   }
 
