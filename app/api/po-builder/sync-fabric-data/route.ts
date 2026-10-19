@@ -12,6 +12,66 @@ import { count, eq } from "drizzle-orm";
 import { requireInternal } from "@/lib/permissions";
 import crypto from "crypto";
 
+/**
+ * The floor that applies when the table being replaced is EMPTY.
+ *
+ * The 50%-shrinkage check below compares a payload against what is already
+ * stored, so it cannot say anything at all about the first sync into an empty
+ * table — and that is precisely when this endpoint is most dangerous, because
+ * the sync is destructive (delete-then-insert) and reports success: true no
+ * matter how little it wrote. A truncated payload lands silently, and it is
+ * sticky afterwards: once the table holds a handful of rows the 50% threshold
+ * is a handful too, so nothing ever complains again.
+ *
+ * That is not hypothetical. Production's fpe_suppliers ended up holding only a
+ * fraction of the sheet this way, and the Product Library — which just lists
+ * whatever distinct style codes are in that table — quietly showed a fraction
+ * of the catalogue for months.
+ *
+ * 50 is a truncation detector, not an assertion about sheet size. The real
+ * sheets parse to ~160 fabric details and ~221 FPE suppliers, so a legitimate
+ * export has to lose two thirds of itself before this trips, while the partial
+ * payloads worth catching are an order of magnitude smaller. force: true still
+ * overrides it, for a genuinely small sheet.
+ */
+const MIN_ROWS_WITHOUT_BASELINE = 50;
+
+/**
+ * Returns an error message if this payload must not be allowed to replace what
+ * is stored, or null if the sync may proceed.
+ *
+ * Both datasets go through here so the two cannot drift apart — the
+ * empty-table hole originally existed in both copies of this check.
+ */
+function rejectionReason(
+  label: string,
+  parsed: number,
+  current: number,
+  force: boolean
+): string | null {
+  if (parsed === 0) {
+    // Not overridable by force: replacing a table with nothing is never the
+    // intent, and `force` exists to accept a SMALL sync, not an empty one.
+    return `${label} validation failed: parsed 0 rows.`;
+  }
+
+  if (force) return null;
+
+  if (current === 0) {
+    return parsed < MIN_ROWS_WITHOUT_BASELINE
+      ? `${label} validation failed: parsed ${parsed} rows into an empty table, ` +
+          `below the ${MIN_ROWS_WITHOUT_BASELINE}-row floor for a sync with nothing ` +
+          `to compare against (likely a truncated payload). Use force: true to override.`
+      : null;
+  }
+
+  const threshold = Math.ceil(current * 0.5);
+  return parsed < threshold
+    ? `${label} validation failed: parsed ${parsed} rows, current DB has ${current} ` +
+        `(would delete >50%). Use force: true to override.`
+    : null;
+}
+
 interface SyncSummary {
   mto?: {
     rowsParsed: number;
@@ -99,28 +159,14 @@ export async function POST(request: NextRequest) {
         `MTO: parsed ${mtoDetailsRecords.length} details, current DB has ${currentMtoDetailsNum}`
       );
 
-      // Safety check: abort if 0 rows or < 50% of current
-      if (mtoDetailsRecords.length === 0) {
-        return NextResponse.json(
-          {
-            error: "MTO validation failed: parsed 0 rows. Use force: true to override.",
-          },
-          { status: 400 }
-        );
-      }
-
-      const threshold = Math.ceil(currentMtoDetailsNum * 0.5);
-      if (
-        currentMtoDetailsNum > 0 &&
-        mtoDetailsRecords.length < threshold &&
-        !force
-      ) {
-        return NextResponse.json(
-          {
-            error: `MTO validation failed: parsed ${mtoDetailsRecords.length} rows, current DB has ${currentMtoDetailsNum} (would delete >50%). Use force: true to override.`,
-          },
-          { status: 400 }
-        );
+      const mtoRejection = rejectionReason(
+        "MTO",
+        mtoDetailsRecords.length,
+        currentMtoDetailsNum,
+        force
+      );
+      if (mtoRejection) {
+        return NextResponse.json({ error: mtoRejection }, { status: 400 });
       }
 
       summary.mto = {
@@ -144,24 +190,14 @@ export async function POST(request: NextRequest) {
         `FPE: parsed ${fpeRecords.length} records, current DB has ${currentFpeNum}`
       );
 
-      // Safety check: abort if 0 rows or < 50% of current
-      if (fpeRecords.length === 0) {
-        return NextResponse.json(
-          {
-            error: "FPE validation failed: parsed 0 rows. Use force: true to override.",
-          },
-          { status: 400 }
-        );
-      }
-
-      const threshold = Math.ceil(currentFpeNum * 0.5);
-      if (currentFpeNum > 0 && fpeRecords.length < threshold && !force) {
-        return NextResponse.json(
-          {
-            error: `FPE validation failed: parsed ${fpeRecords.length} rows, current DB has ${currentFpeNum} (would delete >50%). Use force: true to override.`,
-          },
-          { status: 400 }
-        );
+      const fpeRejection = rejectionReason(
+        "FPE",
+        fpeRecords.length,
+        currentFpeNum,
+        force
+      );
+      if (fpeRejection) {
+        return NextResponse.json({ error: fpeRejection }, { status: 400 });
       }
 
       summary.fpe = {
