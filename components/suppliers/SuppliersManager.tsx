@@ -45,9 +45,15 @@ type Supplier = {
   nickname: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  // The factory's own contact person — the Attn line on a PO.
   pocName: string | null;
   pocEmail: string | null;
   pocPhone: string | null;
+  // The Fresh Prints handler's display name, resolved from pocUserId. A
+  // separate thing from pocName above, and deliberately a separate key: the
+  // two were once merged onto `pocName`, and this form PATCHes what it is
+  // given, so saving a supplier overwrote its factory contact with ours.
+  pocUserName: string | null;
   salesRepName: string | null;
   address: string | null;
   comments: string | null;
@@ -348,17 +354,17 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
               />
               <input
                 value={pocName} onChange={(e) => setPocName(e.target.value)}
-                placeholder="POC name (Point of Contact)"
+                placeholder="Contact name at the factory (Attn on POs)"
                 className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
               />
               <input
                 value={pocEmail} onChange={(e) => setPocEmail(e.target.value)}
-                placeholder="POC email"
+                placeholder="Contact email at the factory"
                 className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
               />
               <input
                 value={pocPhone} onChange={(e) => setPocPhone(e.target.value)}
-                placeholder="POC phone"
+                placeholder="Contact phone at the factory"
                 className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-gray-700"
               />
               <input
@@ -416,7 +422,10 @@ function SupplierRow({ supplier, onRefresh, internalUsers, canReassignPoc }: {
                   <p>👤 Sales Rep: {supplier.salesRepName}</p>
                 )}
                 {supplier.pocName && (
-                  <p>👥 POC: {supplier.pocName}</p>
+                  <p>👥 Contact: {supplier.pocName}</p>
+                )}
+                {supplier.pocUserName && (
+                  <p>🧑‍💼 Handled by: {supplier.pocUserName}</p>
                 )}
                 {supplier.pocEmail && (
                   <p>💬 {supplier.pocEmail}</p>
