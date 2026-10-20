@@ -92,14 +92,18 @@ const EXPORT_SELECT = {
  * takeable because the viewer's machine was a minute fast would fail the guard
  * with no explanation. One authority for expiry, and it is this one.
  *
+ * supplierId is in the constraint because a claim is a pool-only concept and
+ * claimIsActive needs to see that the order has left it — see lib/claims.ts.
+ * Both callers select it; the CSV export, which does not, never comes here.
+ *
  * The holder's NAME is deliberately not joined in. Aliasing a second join onto
  * users would need drizzle's alias(), which is imported per-dialect — and this
  * schema switches dialect at runtime, so that import would be wrong on one of
  * them. The Kanban resolves the id against the team roster it is already given.
  */
-function withClaimState<T extends { processorUserId: number | null; claimedAt: string | null }>(
-  rows: T[]
-): (T & { claimActive: boolean })[] {
+function withClaimState<
+  T extends { supplierId: number | null; processorUserId: number | null; claimedAt: string | null }
+>(rows: T[]): (T & { claimActive: boolean })[] {
   const cutoff = claimCutoff();
   return rows.map((r) => ({ ...r, claimActive: claimIsActive(r, cutoff) }));
 }

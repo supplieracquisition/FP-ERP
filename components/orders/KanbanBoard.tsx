@@ -66,6 +66,13 @@ type OrderItem = {
  * Locked means claimed, live, and not by me. My own claim is not a lock — I can
  * still work the card — and an expired claim is not a lock either, which is why
  * this reads the server's claimActive rather than looking at claimedAt.
+ *
+ * No supplierId check here, deliberately: "has this order left the pool" is
+ * part of claimActive, settled once in claimIsActive(). An assigned order keeps
+ * its processor_user_id and claimed_at forever as the record of who built the
+ * PO and when they started, so a lock derived from those two columns without
+ * the pool check froze every built order for 24 hours. Fixing it in one place
+ * is the point; a second spelling here is how that drifts back apart.
  */
 function lockedByOther(item: OrderItem, userId?: number): boolean {
   return item.claimActive && item.processorUserId !== userId;

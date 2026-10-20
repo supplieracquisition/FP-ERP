@@ -137,18 +137,37 @@ export function heldBy(userId: number, cutoff = claimCutoff()): SQL {
 }
 
 /**
- * The row-level twin of the expiry half of claimable(), for turning a fetched
- * row into the boolean the UI greys cards on.
+ * The row-level twin of claimable(), for turning a fetched row into the boolean
+ * the UI greys cards on.
  *
  * Computed server-side and sent to the client rather than re-derived there:
  * the browser's clock is not the one the write will be judged against, and a
  * card that looks takeable but fails the guard is a worse experience than one
  * that looks locked for a few extra seconds.
+ *
+ * The pool check is the whole point of the first line, and leaving it out was a
+ * bug with teeth. A claim is a pool-only concept: once supplier_id is set the
+ * order has left the pool, nothing can be claimed or released any more, and
+ * processor_user_id is a permanent historical record of who built the PO —
+ * assign-items preserves claimed_at alongside it as the time processing
+ * started. Reading those two columns without the pool check reported a live
+ * lock on an order that had already been assigned, so every internal user
+ * except its processor got a greyed, undraggable card with its stage dropdown
+ * disabled, for the 24 hours following the claim. Worse, the explanation and
+ * the escape hatch both live on the ClaimBar, which only pool cards render —
+ * so the card went dead with nothing on it saying why, and the admin release
+ * button was nowhere (and would have refused anyway: a built PO's processor is
+ * not releasable).
+ *
+ * Mirrors claimable() and heldBy(), which both open with IN_POOL. This is the
+ * row-level spelling of the same rule, which is the only reason it is allowed
+ * to exist beside them.
  */
 export function claimIsActive(
-  row: { processorUserId: number | null; claimedAt: string | null },
+  row: { supplierId: number | null; processorUserId: number | null; claimedAt: string | null },
   cutoff = claimCutoff()
 ): boolean {
+  if (row.supplierId !== null) return false;
   if (row.processorUserId === null) return false;
   if (row.claimedAt === null) return false;
   return row.claimedAt >= cutoff;
